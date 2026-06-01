@@ -17,7 +17,7 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 EXPIRATION = 1
-BASE_AMOUNT = 1
+BASE_AMOUNT =2000
 
 TIMEFRAME_M1 = 60
 TIMEFRAME_M5 = 300
@@ -189,7 +189,7 @@ def main():
 
                     score = score_market(df1, df5)
 
-                    if score < 4:
+                    if score < 3:
                         continue
 
                     s = get_signal(df1, df5)
