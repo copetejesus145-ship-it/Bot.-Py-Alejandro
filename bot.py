@@ -24,8 +24,7 @@ TIMEFRAME_M5 = 300
 
 PAIRS = [
     "EURUSD-OTC", "GBPUSD-OTC", "USDCHF-OTC", "EURGBP-OTC", "EURJPY-OTC",
-    "GBPJPY-OTC", "AUDUSD-OTC", "USDCAD-OTC",
-    "EURCAD-OTC", "GBPCAD-OTC", "AUDJPY-OTC", "CADJPY-OTC", "CHFJPY-OTC"
+    "GBPJPY-OTC"
 ]
 
 
@@ -35,7 +34,7 @@ PAIRS = [
 class RiskManager:
     def __init__(self):
         self.daily = 0
-        self.max_daily = 100
+        self.max_daily = 50
 
     def can_trade(self):
         return self.daily < self.max_daily
@@ -71,7 +70,7 @@ def score_market(df1, df5):
 
 
 DAILY_TRADES = 0
-MAX_DAILY_TRADES = 100
+MAX_DAILY_TRADES = 50
 CURRENT_DAY = datetime.utcnow().day
 
 LOSS_STREAK = 0
@@ -189,7 +188,7 @@ def main():
 
                     score = score_market(df1, df5)
 
-                    if score < 3:
+                    if score < 5:
                         continue
 
                     s = get_signal(df1, df5)
