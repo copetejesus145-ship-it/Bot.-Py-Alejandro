@@ -2,62 +2,60 @@ import numpy as np
 import pandas as pd
 
 # ==================================================
-# 🚀 ESTRATEGIA EXACTA - PATRÓN DE LA IMAGEN
-# ✅ PATRÓN: 3 VERDES + 1 ROJA = VENTA
-# ✅ PATRÓN: 3 ROJAS + 1 VERDE = COMPRA
+# 🚀 ESTRATEGIA EXACTA DE TUS IMÁGENES
+# ✅ LO QUE SE VE EN GRÁFICOS:
+#    - RACHAS LARGAS: 3, 4 o más velas iguales seguidas
+#    - CAMBIO: Aparece la primera vela de color contrario
+# ✅ LÓGICA DE ENTRADA: REVERSIÓN
+#    → Si 3+ VERDES + 1 ROJA = VENDER (PUT)
+#    → Si 3+ ROJAS + 1 VERDE = COMPRAR (CALL)
 # ✅ SOLO ESTA LÓGICA, SIN OTROS INDICADORES
-# ✅ ACTIVO: EURUSD OTC | 1 MINUTO
 # ==================================================
-
-# ============================================
-# 📊 DETECCIÓN DE PATRÓN DE VELAS
-# ============================================
 
 def get_signal(df):
     """
-    FUNCIÓN PRINCIPAL:
-    Analiza las últimas 4 velas cerradas.
-    Si cumple el patrón → Devuelve señal.
-    Si no cumple → No opera.
+    FUNCIÓN PRINCIPAL DE ANÁLISIS:
+    Recibe el DataFrame con las velas.
+    Devuelve: 'call' / 'put' / None
     """
-    # Necesitamos al menos 4 velas para analizar el patrón
+    # Necesitamos mínimo 4 velas para detectar la racha + cambio
     if len(df) < 4:
         return None
 
-    # 📥 TOMAMOS LAS ÚLTIMAS 4 VELAS CERRADAS
-    # (El patrón es de 4 velas: 3 iguales + 1 contraria)
-    ultimas_4 = df.tail(4).copy()
+    # 📥 TOMAMOS LAS ÚLTIMAS 5 VELAS (Suficiente para ver la estructura)
+    ultimas = df.tail(5).copy()
 
     # 🟩 CLASIFICAR VELAS:
     #  1 = VERDE (Alcista: Cierre > Apertura)
     # -1 = ROJA (Bajista: Cierre < Apertura)
-    ultimas_4['tipo'] = np.where(ultimas_4['close'] > ultimas_4['open'], 1, -1)
+    ultimas['tipo'] = np.where(ultimas['close'] > ultimas['open'], 1, -1)
 
-    # Convertimos la secuencia a lista para leerla fácil
-    secuencia = ultimas_4['tipo'].tolist()
-
-    # ============================================
-    # 🟢 PATRÓN 1: 3 VERDES + 1 ROJA → VENDER (PUT)
-    # Secuencia: [1, 1, 1, -1]
-    # ============================================
-    if secuencia == [1, 1, 1, -1]:
-        return "put"
+    # Convertimos a lista para leer la secuencia fácilmente
+    secuencia = ultimas['tipo'].tolist()
 
     # ============================================
-    # 🔴 PATRÓN 2: 3 ROJAS + 1 VERDE → COMPRAR (CALL)
-    # Secuencia: [-1, -1, -1, 1]
+    # 🔴 CASO 1: RACHA DE SUBIDA → CAMBIO A BAJADA
+    # Estructura vista: [1, 1, 1, -1, ...] o [1,1,1,1,-1]
+    # Regla: Las 3 primeras son VERDES, la ÚLTIMA es ROJA
     # ============================================
-    if secuencia == [-1, -1, -1, 1]:
-        return "call"
+    if secuencia[0] == 1 and secuencia[1] == 1 and secuencia[2] == 1 and secuencia[-1] == -1:
+        return "put" # 📉 VENDER: La tendencia cambió a la baja
 
-    # ❌ SI NO CUMPLE NINGÚN PATRÓN: NO OPERAR
+    # ============================================
+    # 🟢 CASO 2: RACHA DE BAJADA → CAMBIO A SUBIDA
+    # Estructura vista: [-1, -1, -1, 1, ...] o [-1,-1,-1,-1,1]
+    # Regla: Las 3 primeras son ROJAS, la ÚLTIMA es VERDE
+    # ============================================
+    if secuencia[0] == -1 and secuencia[1] == -1 and secuencia[2] == -1 and secuencia[-1] == 1:
+        return "call" # 📈 COMPRAR: La tendencia cambió al alza
+
+    # ❌ SI NO CUMPLE EL PATRÓN: NO OPERAR
     return None
 
 
 # ============================================
-# 🔄 COMPATIBILIDAD CON TU BOT
+# 🔄 COMPATIBILIDAD CON EL BOT
 # ============================================
-
 def pro_signal(df):
-    """Alias para mantener compatibilidad con tu código principal"""
+    """Alias para asegurar compatibilidad con el archivo principal"""
     return get_signal(df)
