@@ -24,7 +24,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # ⚙️ PARÁMETROS DE OPERACIÓN
 EXPIRATION = 1                  # ⏱️ EXPIRACIÓN: 1 MINUTO
-BASE_AMOUNT = 6.0               # 💰 MONTO POR OPERACIÓN
+BASE_AMOUNT = 2.0               # 💰 MONTO POR OPERACIÓN
 TIMEFRAME_M1 = 60               # 🕯️ VELAS DE 1 MINUTO
 
 # 🎯 ACTIVOS OTC (Tus pares)
@@ -91,7 +91,7 @@ def connect():
 # ====================================================
 def get_df(iq, pair, tf):
     try:
-        # Pedimos 30 velas, suficientes para detectar la secuencia
+        # Pedimos 20 velas, suficientes para detectar la secuencia
         data = iq.get_candles(pair, tf, 20, time.time())
         df = pd.DataFrame(data)
         if df.empty:
@@ -145,7 +145,7 @@ def main():
                 # Escaneamos todos los activos
                 for pair in PAIRS:
                     df = get_df(iq, pair, TIMEFRAME_M1)
-                    if df is None or len(df) < 5:
+                    if df is None or len(df) < 4:
                         continue
 
                     # ✅ LLAMADA A LA ESTRATEGIA
