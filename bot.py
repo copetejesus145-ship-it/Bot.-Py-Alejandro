@@ -16,8 +16,6 @@ logging.basicConfig(
     level=logging.CRITICAL,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
-# Eliminamos la redirección agresiva de errores que oculta problemas
-# sys.stderr = open(os.devnull, 'w')  # ❌ Eliminado para ver errores reales
 
 # ==========================================
 # 🔑 CONFIGURACIÓN GENERAL
@@ -50,7 +48,6 @@ DAILY_TRADES = 0
 CURRENT_DAY = datetime.utcnow().day
 LOSS_STREAK = 0
 LAST_LOSS = 0
-IQ_INSTANCE = None
 
 # ====================================================
 #   📱 ENVÍO DE MENSAJES A TELEGRAM
@@ -79,10 +76,9 @@ def reset_day():
         send("🔄 <b>NUEVO DÍA INICIADO</b> | Contadores reiniciados.")
 
 # ====================================================
-#   🔌 CONEXIÓN A IQ OPTION (MEJORADA)
+#   🔌 CONEXIÓN A IQ OPTION (CORREGIDA)
 # ====================================================
 def connect():
-    global IQ_INSTANCE
     attempts = 0
     
     while attempts < MAX_RECONNECT_ATTEMPTS:
@@ -93,9 +89,10 @@ def connect():
                 attempts +=1
                 continue
 
+            # Creamos la instancia sin set_session() que causaba error
             iq = IQ_Option(EMAIL, PASSWORD)
-            # Añadimos configuración para evitar bloqueos
-            iq.set_session("bot_session")
+            
+            # Conexión estándar, compatible con versiones actuales
             status, reason = iq.connect()
             
             if status:
@@ -105,7 +102,6 @@ def connect():
                     send("⚠️ No se pudo cambiar a cuenta PRACTICE, usando actual")
                 
                 send("✅ <b>BOT CONECTADO CORRECTAMENTE</b> | ESTRATEGIA: RACHAS + CAMBIO DE TENDENCIA")
-                IQ_INSTANCE = iq
                 return iq
             else:
                 send(f"❌ Error de conexión: {reason} | Intento {attempts+1}/{MAX_RECONNECT_ATTEMPTS}")
@@ -125,6 +121,7 @@ def connect():
 # ====================================================
 def get_df(iq, pair, tf):
     try:
+        # Verificamos que la conexión siga activa
         if not iq.check_connect():
             send("⚠️ Conexión perdida, reconectando...")
             iq = connect()
