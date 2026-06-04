@@ -27,7 +27,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # ⚙️ PARÁMETROS DE OPERACIÓN
 EXPIRATION = 1                  # ⏱️ EXPIRACIÓN: 1 MINUTO
-BASE_AMOUNT = 64               # 💰 MONTO POR OPERACIÓN
+BASE_AMOUNT = 4               # 💰 MONTO POR OPERACIÓN
 TIMEFRAME_M1 = 60               # 🕯️ VELAS DE 1 MINUTO
 
 # 🎯 ACTIVOS OTC (Tus pares)
