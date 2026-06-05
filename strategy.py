@@ -5,68 +5,87 @@ import pandas as pd
 # 🚀 ESTRATEGIA: RACHAS + LECTURA DE ESTRUCTURA
 # ✅ LÓGICA:
 # 1. DETECTAR ESTRUCTURA GENERAL DE CADA PAR
-# 2. BUSCAR PATRÓN DE RACHA + CAMBIO
-# 3. SOLO OPERAR SI LA SEÑAL COINCIDE CON LA ESTRUCTURA
+# 2. BUSCAR PATRÓN: 3+ velas iguales + 1 contraria
+# 3. FILTROS DE FUERZA para evitar señales falsas
+# ✅ REGLAS:
+#    → 3+ VERDES + 1 ROJA = VENTA (PUT)
+#    → 3+ ROJAS + 1 VERDE = COMPRA (CALL)
 # ==================================================
 
 def get_signal(df):
-    if len(df) < 8:  # Necesitamos más velas para ver la estructura
+    """
+    Analiza la secuencia de velas y la estructura del mercado
+    Devuelve: 'call' / 'put' / None
+    """
+
+    # 🛑 REQUISITO: Necesitamos mínimo 8 velas para analizar estructura
+    if len(df) < 8:
         return None
 
     # --------------------------
     # 🔍 PASO 1: LEER ESTRUCTURA DEL MERCADO
     # --------------------------
-    ultimas_velas = df.tail(8).copy()
-    maximos = ultimas_velas['high'].values
-    minimos = ultimas_velas['low'].values
+    ultimas_8 = df.tail(8).copy()
+    maximos = ultimas_8['high'].values
+    minimos = ultimas_8['low'].values
 
-    # Detectar tipo de estructura
     estructura = "lateral"
-    if maximos[-1] > maximos[-2] > maximos[-3] and minimos[-1] > minimos[-2] > minimos[-3]:
-        estructura = "alcista"  # Máximos y mínimos crecientes
-    elif maximos[-1] < maximos[-2] < maximos[-3] and minimos[-1] < minimos[-2] < minimos[-3]:
-        estructura = "bajista"  # Máximos y mínimos decrecientes
+    # Estructura alcista: máximos y mínimos crecientes
+    if (maximos[-1] > maximos[-2] > maximos[-3]) and (minimos[-1] > minimos[-2] > minimos[-3]):
+        estructura = "alcista"
+    # Estructura bajista: máximos y mínimos decrecientes
+    elif (maximos[-1] < maximos[-2] < maximos[-3]) and (minimos[-1] < minimos[-2] < minimos[-3]):
+        estructura = "bajista"
 
     # --------------------------
-    # 📊 PASO 2: CLASIFICAR VELAS Y SECUENCIA
+    # 📊 PASO 2: ANALIZAR SECUENCIA DE VELAS
     # --------------------------
-    analisis = df.tail(5).copy()
-    analisis['tipo'] = np.where(analisis['close'] > analisis['open'], 1, -1)
-    secuencia = analisis['tipo'].tolist()
+    ultimas_5 = df.tail(5).copy()
+    # Clasificar velas: 1 = Verde, -1 = Roja
+    ultimas_5['tipo'] = np.where(ultimas_5['close'] > ultimas_5['open'], 1, -1)
+    secuencia = ultimas_5['tipo'].tolist()
 
-    # Filtro de tamaño mínimo
-    rango_prom = df['high'].sub(df['low']).tail(10).mean()
-    tamaño_cambio = analisis.iloc[-1]['high'] - analisis.iloc[-1]['low']
-    if tamaño_cambio < rango_prom * 0.55:
+    # --------------------------
+    # 📏 FILTRO 1: TAMAÑO DE VELA
+    # Evita velas sin fuerza (ruido)
+    # --------------------------
+    df_previo = df.tail(10).copy()
+    df_previo['rango'] = df_previo['high'] - df_previo['low']
+    rango_promedio = df_previo['rango'].mean()
+    rango_minimo = rango_promedio * 0.6
+
+    vela_cambio = ultimas_5.iloc[-1]
+    tamaño_cambio = vela_cambio['high'] - vela_cambio['low']
+
+    if tamaño_cambio < rango_minimo:
         return None
 
     # --------------------------
-    # ✅ PASO 3: SEÑALES SEGÚN ESTRUCTURA
+    # ✅ PASO 3: EVALUAR SEÑALES
     # --------------------------
-    # CASO 1: Racha bajista → posible compra
-    if secuencia[0] == -1 and secuencia[1] == -1 and secuencia[2] == -1 and secuencia[-1] == 1:
-        vela_racha = analisis.iloc[-2]
-        vela_cambio = analisis.iloc[-1]
-        punto_medio = (vela_racha['high'] + vela_racha['low']) / 2
+    vela_racha = ultimas_5.iloc[-2]
+    punto_medio_racha = (vela_racha['high'] + vela_racha['low']) / 2
 
-        # Solo aceptamos si:
-        # - La vela confirma el cambio
-        # - O estamos en estructura bajista (reversión) o lateral
-        if vela_cambio['close'] > punto_medio:
-            if estructura in ["bajista", "lateral"]:
-                return "call"
-
-    # CASO 2: Racha alcista → posible venta
+    # 🔴 CASO 1: Racha alcista → Cambio a bajista
     if secuencia[0] == 1 and secuencia[1] == 1 and secuencia[2] == 1 and secuencia[-1] == -1:
-        vela_racha = analisis.iloc[-2]
-        vela_cambio = analisis.iloc[-1]
-        punto_medio = (vela_racha['high'] + vela_racha['low']) / 2
-
-        if vela_cambio['close'] < punto_medio:
+        # Confirmación: cierra debajo del medio de la racha
+        if vela_cambio['close'] < punto_medio_racha:
+            # Solo válido si no va en contra de tendencia muy fuerte
             if estructura in ["alcista", "lateral"]:
                 return "put"
 
+    # 🟢 CASO 2: Racha bajista → Cambio a alcista
+    if secuencia[0] == -1 and secuencia[1] == -1 and secuencia[2] == -1 and secuencia[-1] == 1:
+        # Confirmación: cierra por encima del medio de la racha
+        if vela_cambio['close'] > punto_medio_racha:
+            # Solo válido si no va en contra de tendencia muy fuerte
+            if estructura in ["bajista", "lateral"]:
+                return "call"
+
     return None
 
+# ====================================================
+# 🔄 Alias de compatibilidad
+# ====================================================
 def pro_signal(df):
     return get_signal(df)
