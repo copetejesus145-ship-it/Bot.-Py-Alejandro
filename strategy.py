@@ -2,90 +2,92 @@ import numpy as np
 import pandas as pd
 
 # ==================================================
-# 🚀 ESTRATEGIA: RACHAS + LECTURA DE ESTRUCTURA
+# 🚀 ESTRATEGIA SELECTIVA: SOLO OPORTUNIDADES CLARAS
 # ✅ LÓGICA:
-# 1. DETECTAR ESTRUCTURA GENERAL DE CADA PAR
-# 2. BUSCAR PATRÓN: 3+ velas iguales + 1 contraria
-# 3. FILTROS DE FUERZA para evitar señales falsas
-# ✅ REGLAS:
-#    → 3+ VERDES + 1 ROJA = VENTA (PUT)
-#    → 3+ ROJAS + 1 VERDE = COMPRA (CALL)
+# 1. Leer estructura del mercado por cada par
+# 2. Detectar patrón: 3+ velas seguidas + cambio de dirección
+# 3. Aplicar filtros estrictos de fuerza y contexto
+# 4. Solo operar si la probabilidad es favorable
 # ==================================================
 
 def get_signal(df):
     """
-    Analiza la secuencia de velas y la estructura del mercado
-    Devuelve: 'call' / 'put' / None
+    Devuelve señal solo si se cumple todo el conjunto de condiciones
     """
-
-    # 🛑 REQUISITO: Necesitamos mínimo 8 velas para analizar estructura
-    if len(df) < 8:
+    if len(df) < 12:
         return None
 
-    # --------------------------
-    # 🔍 PASO 1: LEER ESTRUCTURA DEL MERCADO
-    # --------------------------
-    ultimas_8 = df.tail(8).copy()
-    maximos = ultimas_8['high'].values
-    minimos = ultimas_8['low'].values
+    # ======================================
+    # 🔍 PASO 1: ANALIZAR ESTRUCTURA GENERAL
+    # ======================================
+    ultimas_10 = df.tail(10).copy()
+    maximos = ultimas_10['high'].values
+    minimos = ultimas_10['low'].values
+    cierres = ultimas_10['close'].values
 
+    # Definir estructura
     estructura = "lateral"
-    # Estructura alcista: máximos y mínimos crecientes
-    if (maximos[-1] > maximos[-2] > maximos[-3]) and (minimos[-1] > minimos[-2] > minimos[-3]):
-        estructura = "alcista"
-    # Estructura bajista: máximos y mínimos decrecientes
-    elif (maximos[-1] < maximos[-2] < maximos[-3]) and (minimos[-1] < minimos[-2] < minimos[-3]):
-        estructura = "bajista"
+    fuerza_tendencia = 0
 
-    # --------------------------
-    # 📊 PASO 2: ANALIZAR SECUENCIA DE VELAS
-    # --------------------------
+    if maximos[-1] > maximos[-3] and minimos[-1] > minimos[-3] and cierres[-1] > cierres[-5]:
+        estructura = "alcista"
+        fuerza_tendencia = 1
+    elif maximos[-1] < maximos[-3] and minimos[-1] < minimos[-3] and cierres[-1] < cierres[-5]:
+        estructura = "bajista"
+        fuerza_tendencia = -1
+
+    # ======================================
+    # 📊 PASO 2: DETECTAR SECUENCIA DE VELAS
+    # ======================================
     ultimas_5 = df.tail(5).copy()
-    # Clasificar velas: 1 = Verde, -1 = Roja
     ultimas_5['tipo'] = np.where(ultimas_5['close'] > ultimas_5['open'], 1, -1)
     secuencia = ultimas_5['tipo'].tolist()
 
-    # --------------------------
-    # 📏 FILTRO 1: TAMAÑO DE VELA
-    # Evita velas sin fuerza (ruido)
-    # --------------------------
-    df_previo = df.tail(10).copy()
-    df_previo['rango'] = df_previo['high'] - df_previo['low']
-    rango_promedio = df_previo['rango'].mean()
-    rango_minimo = rango_promedio * 0.6
+    # ======================================
+    # 🛡️ FILTROS DE CALIDAD
+    # ======================================
+    df_analisis = df.tail(15).copy()
+    df_analisis['rango'] = df_analisis['high'] - df_analisis['low']
+    rango_promedio = df_analisis['rango'].mean()
+    volumen_promedio = df_analisis['volume'].mean()
 
     vela_cambio = ultimas_5.iloc[-1]
-    tamaño_cambio = vela_cambio['high'] - vela_cambio['low']
+    vela_racha = ultimas_5.iloc[-2]
 
-    if tamaño_cambio < rango_minimo:
+    # 1. Tamaño suficiente
+    if (vela_cambio['high'] - vela_cambio['low']) < rango_promedio * 0.7:
         return None
 
-    # --------------------------
-    # ✅ PASO 3: EVALUAR SEÑALES
-    # --------------------------
-    vela_racha = ultimas_5.iloc[-2]
-    punto_medio_racha = (vela_racha['high'] + vela_racha['low']) / 2
+    # 2. Volumen mayor al promedio
+    if vela_cambio['volume'] < volumen_promedio * 0.8:
+        return None
 
-    # 🔴 CASO 1: Racha alcista → Cambio a bajista
-    if secuencia[0] == 1 and secuencia[1] == 1 and secuencia[2] == 1 and secuencia[-1] == -1:
-        # Confirmación: cierra debajo del medio de la racha
-        if vela_cambio['close'] < punto_medio_racha:
-            # Solo válido si no va en contra de tendencia muy fuerte
-            if estructura in ["alcista", "lateral"]:
-                return "put"
+    # 3. Cierre fuerte
+    punto_medio = (vela_racha['high'] + vela_racha['low']) / 2
 
-    # 🟢 CASO 2: Racha bajista → Cambio a alcista
+    # ======================================
+    # ✅ EVALUAR OPORTUNIDADES
+    # ======================================
+
+    # CASO 1: Racha bajista → posible compra
     if secuencia[0] == -1 and secuencia[1] == -1 and secuencia[2] == -1 and secuencia[-1] == 1:
-        # Confirmación: cierra por encima del medio de la racha
-        if vela_cambio['close'] > punto_medio_racha:
-            # Solo válido si no va en contra de tendencia muy fuerte
-            if estructura in ["bajista", "lateral"]:
+        # Confirmación de cambio real
+        if vela_cambio['close'] > punto_medio and vela_cambio['close'] > vela_racha['high'] * 0.98:
+            # Solo si no va en contra de tendencia muy fuerte
+            if fuerza_tendencia >= -0.5:
                 return "call"
 
+    # CASO 2: Racha alcista → posible venta
+    if secuencia[0] == 1 and secuencia[1] == 1 and secuencia[2] == 1 and secuencia[-1] == -1:
+        # Confirmación de cambio real
+        if vela_cambio['close'] < punto_medio and vela_cambio['close'] < vela_racha['low'] * 1.02:
+            # Solo si no va en contra de tendencia muy fuerte
+            if fuerza_tendencia <= 0.5:
+                return "put"
+
+    # ❌ Si no cumple todas las condiciones: NO OPERAR
     return None
 
-# ====================================================
-# 🔄 Alias de compatibilidad
-# ====================================================
+# Compatibilidad
 def pro_signal(df):
     return get_signal(df)
