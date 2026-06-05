@@ -32,8 +32,7 @@ TIMEFRAME_M1 = 60               # 🕯️ Velas de 1 minuto
 
 # 🎯 Activos OTC
 PAIRS = [
-    "EURUSD-OTC", "GBPUSD-OTC", "USDCHF-OTC", 
-    "EURGBP-OTC", "EURJPY-OTC", "GBPJPY-OTC"
+    "EURUSD-OTC", "GBPUSD-OTC", "USDCHF-OTC", "EURJPY-OTC"
 ]
 
 # 🛑 GESTIÓN DE RIESGO
