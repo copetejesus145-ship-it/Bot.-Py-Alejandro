@@ -4,53 +4,54 @@ import requests
 import pandas as pd
 import sys
 import logging
-from datetime import datetime, UTC  # ✅ Importamos UTC correctamente
+from datetime import datetime, UTC
 
-# ✅ Importamos la estrategia
+# Importar estrategia
 from strategy import get_signal
 
 from iqoptionapi.stable_api import IQ_Option
 
-# Configuración de logging
+# Configuración de logs
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
 # ==========================================
-# 🔑 CONFIGURACIÓN GENERAL
+# 🔑 CONFIGURACIÓN
 # ==========================================
 EMAIL = os.getenv("IQ_EMAIL")
 PASSWORD = os.getenv("IQ_PASSWORD")
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# ⚙️ PARÁMETROS DE OPERACIÓN
-EXPIRATION = 1                  # ⏱️ Vencimiento: 1 minuto
-BASE_AMOUNT = 26                # 💰 Monto por operación
-TIMEFRAME_M1 = 60               # 🕯️ Velas de 1 minuto
+# ⚙️ PARÁMETROS
+EXPIRATION = 1                  # 1 minuto
+BASE_AMOUNT = 27                # Monto por operación
+TIMEFRAME_M1 = 60               # Velas de 1 minuto
 
-# 🎯 Activos OTC
+# 🎯 Activos a monitorear
 PAIRS = [
-    "EURUSD-OTC", "GBPUSD-OTC", "USDCHF-OTC", "EURJPY-OTC"
+    "EURUSD-OTC", "GBPUSD-OTC", "USDCHF-OTC",
+    "EURGBP-OTC", "EURJPY-OTC", "GBPJPY-OTC"
 ]
 
 # 🛑 GESTIÓN DE RIESGO
-MAX_DAILY_TRADES = 15           # Máx operaciones por día
+MAX_DAILY_TRADES = 12           # Menos operaciones = más selectivo
 MAX_LOSS_STREAK = 2             # Detener tras 2 pérdidas seguidas
-PAUSE_TIME = 600                # Pausa 10 minutos tras pérdidas
+PAUSE_TIME = 900                # Pausa 15 minutos tras pérdidas
 MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_DELAY = 5
 
-# 🚦 Variables globales
+# 🚦 Variables de control
 DAILY_TRADES = 0
-CURRENT_DAY = datetime.now(UTC).day  # ✅ Corregido
+CURRENT_DAY = datetime.now(UTC).day
 LOSS_STREAK = 0
 LAST_LOSS = 0
 LAST_SIGNAL = None
 
 # ====================================================
-#   📱 ENVÍO DE MENSAJES A TELEGRAM
+# 📱 ENVÍO DE MENSAJES A TELEGRAM
 # ====================================================
 def send(msg):
     if TOKEN and CHAT_ID:
@@ -64,27 +65,27 @@ def send(msg):
             logging.error(f"Error Telegram: {str(e)}")
 
 # ====================================================
-#   🔄 REINICIO DE CONTADORES DIARIOS
+# 🔄 REINICIO DIARIO
 # ====================================================
 def reset_day():
     global DAILY_TRADES, CURRENT_DAY, LOSS_STREAK, LAST_SIGNAL
-    today = datetime.now(UTC).day  # ✅ Corregido: usa zona horaria UTC
+    today = datetime.now(UTC).day
     if today != CURRENT_DAY:
         DAILY_TRADES = 0
         LOSS_STREAK = 0
         LAST_SIGNAL = None
         CURRENT_DAY = today
-        send("🔄 <b>NUEVO DÍA</b> | Contadores reiniciados.")
+        send("🔄 <b>NUEVO DÍA INICIADO</b> | Contadores reiniciados.")
 
 # ====================================================
-#   🔌 CONEXIÓN A IQ OPTION
+# 🔌 CONEXIÓN A IQ OPTION
 # ====================================================
 def connect():
     attempts = 0
     while attempts < MAX_RECONNECT_ATTEMPTS:
         try:
             if not EMAIL or not PASSWORD:
-                send("❌ ERROR: Credenciales IQ_EMAIL o IQ_PASSWORD no configuradas")
+                send("❌ ERROR: Credenciales no configuradas")
                 time.sleep(10)
                 attempts += 1
                 continue
@@ -93,15 +94,15 @@ def connect():
             status, reason = iq.connect()
 
             if status:
-                iq.change_balance("PRACTICE")  # Cambia a "REAL" cuando estés listo
+                iq.change_balance("PRACTICE")  # Cambiar a "REAL" cuando estés listo
                 balance = iq.get_balance()
                 send(f"✅ <b>CONECTADO</b> | Saldo: ${balance:.2f}")
                 return iq
             else:
-                send(f"❌ Conexión fallida: {reason} | Intento {attempts+1}/{MAX_RECONNECT_ATTEMPTS}")
+                send(f"❌ Error conexión: {reason} | Intento {attempts+1}/{MAX_RECONNECT_ATTEMPTS}")
 
         except Exception as e:
-            send(f"❌ Error de conexión: {str(e)} | Intento {attempts+1}/{MAX_RECONNECT_ATTEMPTS}")
+            send(f"❌ Error conexión: {str(e)} | Intento {attempts+1}/{MAX_RECONNECT_ATTEMPTS}")
 
         attempts += 1
         time.sleep(RECONNECT_DELAY)
@@ -111,7 +112,7 @@ def connect():
     return connect()
 
 # ====================================================
-#   📥 OBTENER Y VALIDAR DATOS DE MERCADO
+# 📥 OBTENER DATOS DE MERCADO
 # ====================================================
 def get_df(iq, pair, tf):
     try:
@@ -121,10 +122,9 @@ def get_df(iq, pair, tf):
             if not iq:
                 return None
 
-        data = iq.get_candles(pair, tf, 40, time.time())
+        data = iq.get_candles(pair, tf, 50, time.time())
 
-        if not data or len(data) < 15:
-            logging.warning(f"Datos insuficientes para {pair}")
+        if not data or len(data) < 20:
             return None
 
         df = pd.DataFrame(data)
@@ -138,11 +138,11 @@ def get_df(iq, pair, tf):
         return df
 
     except Exception as e:
-        logging.error(f"Error en datos {pair}: {str(e)}")
+        logging.error(f"Datos {pair}: {str(e)}")
         return None
 
 # ====================================================
-#   🧠 BUCLE PRINCIPAL
+# 🧠 BUCLE PRINCIPAL
 # ====================================================
 def main():
     global LOSS_STREAK, LAST_LOSS, DAILY_TRADES, LAST_SIGNAL
@@ -158,9 +158,7 @@ def main():
                 time.sleep(2)
                 continue
 
-            # ======================================
             # 🛑 CONTROLES DE SEGURIDAD
-            # ======================================
             if DAILY_TRADES >= MAX_DAILY_TRADES:
                 time.sleep(60)
                 continue
@@ -173,11 +171,9 @@ def main():
                 else:
                     LOSS_STREAK = 0
                     LAST_SIGNAL = None
-                    send("✅ Pausa finalizada. Reanudando.")
+                    send("✅ Pausa finalizada. Buscando nuevas oportunidades...")
 
-            # ======================================
-            # ⏱️ TIEMPO PRECISO DEL SERVIDOR
-            # ======================================
+            # ⏱️ TIEMPO DEL SERVIDOR
             server_time = iq.get_server_timestamp()
             sec = server_time % 60
             current_candle = int(server_time // 60)
@@ -186,22 +182,19 @@ def main():
                 time.sleep(0.1)
                 continue
 
-            # ======================================
-            # 🔍 ANÁLISIS (segundos 40 a 58)
-            # ======================================
+            # 🔍 ANÁLISIS DE OPORTUNIDADES (segundos 40 a 58)
             best_pair = None
             best_signal = None
 
             if 40 <= sec <= 58:
                 for pair in PAIRS:
                     df = get_df(iq, pair, TIMEFRAME_M1)
-                    if df is None or len(df) < 15:
+                    if df is None:
                         continue
 
                     try:
                         signal = get_signal(df)
                     except Exception as e:
-                        send(f"⚠️ Error estrategia {pair}: {str(e)}")
                         continue
 
                     if signal in ["call", "put"]:
@@ -209,12 +202,10 @@ def main():
                             best_pair = pair
                             best_signal = signal
                             LAST_SIGNAL = (best_pair, best_signal)
-                            send(f"🔍 Señal detectada: {pair} | {best_signal.upper()}")
+                            send(f"🎯 <b>OPORTUNIDAD DETECTADA</b>\n💹 Activo: {pair}\n📊 Dirección: {'COMPRA' if signal == 'call' else 'VENTA'}")
                             break
 
-            # ======================================
-            # ⚡ EJECUCIÓN (cierre exacto de vela)
-            # ======================================
+            # ⚡ EJECUCIÓN SOLO SI HAY OPORTUNIDAD
             if 59.2 <= sec <= 59.98:
                 if not best_pair or not best_signal:
                     time.sleep(0.1)
@@ -243,7 +234,7 @@ def main():
                         if res < 0:
                             LOSS_STREAK += 1
                             LAST_LOSS = time.time()
-                            send(f"❌ <b>LOSS</b> | -${abs(res):.2f}\n⚠️ Rachas: {LOSS_STREAK}/{MAX_LOSS_STREAK}")
+                            send(f"❌ <b>LOSS</b> | -${abs(res):.2f}\n⚠️ Pausa activada por 15 minutos")
                         else:
                             LOSS_STREAK = 0
                             send(f"✅ <b>WIN</b> | +${res:.2f}\n_________________________")
