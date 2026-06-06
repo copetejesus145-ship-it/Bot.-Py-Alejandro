@@ -6,7 +6,7 @@ import sys
 import logging
 from datetime import datetime, UTC
 
-# Importar estrategia de continuidad
+# Importar estrategia de continuidad fuerte
 from strategy import get_signal
 
 from iqoptionapi.stable_api import IQ_Option
@@ -37,11 +37,11 @@ PAIRS = [
 ]
 
 # 🛑 GESTIÓN DE RIESGO
-MAX_DAILY_TRADES = 12           # Máximo 12 operaciones por día
+MAX_DAILY_TRADES = 8            # Menos operaciones = mayor calidad
 MAX_LOSS_STREAK = 2             # Detener tras 2 pérdidas seguidas
-PAUSE_TIME = 900                # Pausa 15 minutos tras pérdidas
-MAX_RECONNECT_ATTEMPTS = 5      # Intentos de reconexión
-RECONNECT_DELAY = 5             # Tiempo entre intentos
+PAUSE_TIME = 1200               # Pausa 20 minutos tras pérdidas
+MAX_RECONNECT_ATTEMPTS = 5
+RECONNECT_DELAY = 5
 
 # 🚦 Variables de control
 DAILY_TRADES = 0
@@ -62,7 +62,7 @@ def send(msg):
                 timeout=8
             )
         except Exception as e:
-            logging.error(f"Error al enviar mensaje Telegram: {str(e)}")
+            logging.error(f"Error Telegram: {str(e)}")
 
 # ====================================================
 # 🔄 REINICIO DE CONTADORES DIARIOS
@@ -75,7 +75,7 @@ def reset_day():
         LOSS_STREAK = 0
         LAST_SIGNAL = None
         CURRENT_DAY = today
-        send("🔄 <b>NUEVO DÍA INICIADO</b> | Contadores reiniciados.")
+        send("🔄 <b>NUEVO DÍA INICIADO</b> | Buscando tendencias FUERTES.")
 
 # ====================================================
 # 🔌 CONEXIÓN A IQ OPTION
@@ -85,7 +85,7 @@ def connect():
     while attempts < MAX_RECONNECT_ATTEMPTS:
         try:
             if not EMAIL or not PASSWORD:
-                send("❌ ERROR: Credenciales IQ_EMAIL o IQ_PASSWORD no configuradas")
+                send("❌ ERROR: Credenciales no configuradas")
                 time.sleep(10)
                 attempts += 1
                 continue
@@ -96,18 +96,18 @@ def connect():
             if status:
                 iq.change_balance("PRACTICE")  # Cambiar a "REAL" cuando estés listo
                 balance = iq.get_balance()
-                send(f"✅ <b>BOT CONECTADO CORRECTAMENTE</b> | Saldo: ${balance:.2f}")
+                send(f"✅ <b>CONECTADO</b> | Saldo: ${balance:.2f}")
                 return iq
             else:
-                send(f"❌ Error de conexión: {reason} | Intento {attempts+1}/{MAX_RECONNECT_ATTEMPTS}")
+                send(f"❌ Error conexión: {reason} | Intento {attempts+1}/{MAX_RECONNECT_ATTEMPTS}")
 
         except Exception as e:
-            send(f"❌ Error de conexión: {str(e)} | Intento {attempts+1}/{MAX_RECONNECT_ATTEMPTS}")
+            send(f"❌ Error conexión: {str(e)} | Intento {attempts+1}/{MAX_RECONNECT_ATTEMPTS}")
 
         attempts += 1
         time.sleep(RECONNECT_DELAY)
 
-    send("💥 No se pudo conectar después de varios intentos. Reintentando en 30 segundos...")
+    send("💥 No se pudo conectar. Reintentando en 30s...")
     time.sleep(30)
     return connect()
 
@@ -122,16 +122,14 @@ def get_df(iq, pair, tf):
             if not iq:
                 return None
 
-        data = iq.get_candles(pair, tf, 50, time.time())
+        data = iq.get_candles(pair, tf, 60, time.time())  # Más velas para analizar fuerza
 
-        if not data or len(data) < 20:
-            logging.warning(f"Datos insuficientes para {pair}")
+        if not data or len(data) < 25:
             return None
 
         df = pd.DataFrame(data)
         required_cols = ["open", "close", "max", "min", "volume"]
         if not all(col in df.columns for col in required_cols):
-            logging.error(f"Estructura de datos inválida para {pair}")
             return None
 
         df.rename(columns={"max": "high", "min": "low"}, inplace=True)
@@ -140,11 +138,11 @@ def get_df(iq, pair, tf):
         return df
 
     except Exception as e:
-        logging.error(f"Error al obtener datos de {pair}: {str(e)}")
+        logging.error(f"Datos {pair}: {str(e)}")
         return None
 
 # ====================================================
-# 🧠 BUCLE PRINCIPAL DE EJECUCIÓN
+# 🧠 BUCLE PRINCIPAL
 # ====================================================
 def main():
     global LOSS_STREAK, LAST_LOSS, DAILY_TRADES, LAST_SIGNAL
@@ -162,22 +160,20 @@ def main():
 
             # 🛑 CONTROLES DE SEGURIDAD
             if DAILY_TRADES >= MAX_DAILY_TRADES:
-                send(f"ℹ️ Límite diario alcanzado ({MAX_DAILY_TRADES} operaciones). Esperando siguiente día.")
                 time.sleep(60)
                 continue
 
             if LOSS_STREAK >= MAX_LOSS_STREAK:
                 remaining = int(PAUSE_TIME - (time.time() - LAST_LOSS))
                 if remaining > 0:
-                    send(f"⏸️ Pausa activa por pérdidas: {remaining}s restantes")
                     time.sleep(10)
                     continue
                 else:
                     LOSS_STREAK = 0
                     LAST_SIGNAL = None
-                    send("✅ Pausa finalizada. Buscando continuidad de tendencia...")
+                    send("✅ Pausa finalizada. Buscando tendencias fuertes...")
 
-            # ⏱️ TIEMPO PRECISO DEL SERVIDOR
+            # ⏱️ TIEMPO DEL SERVIDOR
             server_time = iq.get_server_timestamp()
             sec = server_time % 60
             current_candle = int(server_time // 60)
@@ -186,7 +182,7 @@ def main():
                 time.sleep(0.1)
                 continue
 
-            # 🔍 ANÁLISIS DE CONTINUIDAD (segundos 40 a 58)
+            # 🔍 ANÁLISIS (segundos 40 a 58)
             best_pair = None
             best_signal = None
 
@@ -199,7 +195,6 @@ def main():
                     try:
                         signal = get_signal(df)
                     except Exception as e:
-                        send(f"⚠️ Error en estrategia para {pair}: {str(e)}")
                         continue
 
                     if signal in ["call", "put"]:
@@ -207,12 +202,12 @@ def main():
                             best_pair = pair
                             best_signal = signal
                             LAST_SIGNAL = (best_pair, best_signal)
-                            send(f"""🎯 <b>CONTINUIDAD DETECTADA</b>
+                            send(f"""🎯 <b>TENDENCIA FUERTE DETECTADA</b>
 💹 Activo: {pair}
-📊 Dirección: {'🟢 ALCISTA (CONTINUACIÓN)' if signal == 'call' else '🔴 BAJISTA (CONTINUACIÓN)'}""")
+📊 Dirección: {'🟢 ALCISTA FUERTE' if signal == 'call' else '🔴 BAJISTA FUERTE'}""")
                             break
 
-            # ⚡ EJECUCIÓN SOLO SI HAY CONTINUIDAD VÁLIDA
+            # ⚡ EJECUCIÓN
             if 59.2 <= sec <= 59.98:
                 if not best_pair or not best_signal:
                     time.sleep(0.1)
@@ -224,9 +219,10 @@ def main():
 
                 if status:
                     DAILY_TRADES += 1
+                    tipo = "🟢 <b>COMPRA - CONTINUIDAD FUERTE</b>" if best_signal == "call" else "🔴 <b>VENTA - CONTINUIDAD FUERTE</b>"
                     send(f"""🚀 <b>OPERACIÓN EJECUTADA</b>
 💹 Activo: {best_pair}
-📈 Tipo: {'🟢 <b>COMPRA - CONTINUACIÓN ALCISTA</b>' if best_signal == 'call' else '🔴 <b>VENTA - CONTINUACIÓN BAJISTA</b>'}
+📈 Tipo: {tipo}
 💲 Monto: ${BASE_AMOUNT:.2f}
 🔄 #Op: {DAILY_TRADES}/{MAX_DAILY_TRADES}""")
 
@@ -234,27 +230,27 @@ def main():
                     try:
                         res = iq.check_win_v4(trade_id)
                         if res is None:
-                            send("⚠️ No se pudo obtener el resultado de la operación")
+                            send("⚠️ No se pudo obtener resultado")
                             continue
 
                         if res < 0:
                             LOSS_STREAK += 1
                             LAST_LOSS = time.time()
-                            send(f"❌ <b>LOSS</b> | Pérdida: -${abs(res):.2f}\n⚠️ Rachas: {LOSS_STREAK}/{MAX_LOSS_STREAK}")
+                            send(f"❌ <b>LOSS</b> | -${abs(res):.2f}\n⚠️ Rachas: {LOSS_STREAK}/{MAX_LOSS_STREAK}")
                         else:
                             LOSS_STREAK = 0
-                            send(f"✅ <b>WIN</b> | Ganancia: +${res:.2f}\n_________________________")
+                            send(f"✅ <b>WIN</b> | +${res:.2f}\n_________________________")
 
                     except Exception as e:
-                        send(f"⚠️ Error al verificar resultado: {str(e)}")
+                        send(f"⚠️ Error al verificar: {str(e)}")
                 else:
-                    send(f"❌ No se pudo ejecutar operación en {best_pair}")
+                    send(f"❌ No se pudo ejecutar operación")
 
             time.sleep(0.05)
 
         except Exception as e:
-            send(f"💥 <b>ERROR CRÍTICO:</b> {str(e)} | Reconectando...")
-            logging.exception("Error en bucle principal")
+            send(f"💥 ERROR: {str(e)} | Reconectando...")
+            logging.exception("Error en bucle")
             time.sleep(5)
             try:
                 iq = connect()
@@ -265,8 +261,7 @@ if __name__ == "__main__":
     required_vars = ["IQ_EMAIL", "IQ_PASSWORD", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"]
     missing = [var for var in required_vars if not os.getenv(var)]
     if missing:
-        print(f"❌ Faltan variables de entorno: {', '.join(missing)}")
-        send(f"❌ Faltan configuraciones: {', '.join(missing)}")
+        print(f"❌ Faltan variables: {', '.join(missing)}")
         sys.exit(1)
 
     main()
