@@ -2,91 +2,102 @@ import numpy as np
 import pandas as pd
 
 # ==================================================
-# 🚀 ESTRATEGIA DE CONTINUIDAD DE TENDENCIA
-# ✅ LÓGICA:
-# 1. Detectar tendencia establecida (3+ velas del mismo color)
-# 2. Confirmar que la siguiente vela mantiene la dirección
-# 3. Aplicar filtros de fuerza para asegurar que la tendencia sigue
-# 4. Solo operar A FAVOR de la dirección dominante
+# 🚀 ESTRATEGIA: SOLO CONTINUIDAD EN TENDENCIA FUERTE
+# ✅ LÓGICA ESTRICTA:
+# 1. Requiere tendencia consolidada (máximos/mínimos crecientes/decrecientes)
+# 2. Secuencia mínima: 4 velas seguidas del mismo color (no 3)
+# 3. Filtros de fuerza: tamaño, volumen y velocidad del movimiento
+# 4. DESCARTAR mercados laterales o sin fuerza
 # ✅ REGLAS:
-#    → 3+ VERDES + SIGUE VERDE = COMPRA (CALL)
-#    → 3+ ROJAS + SIGUE ROJA = VENTA (PUT)
+#    → 4+ VERDES + estructura alcista fuerte = COMPRA
+#    → 4+ ROJAS + estructura bajista fuerte = VENTA
 # ==================================================
 
 def get_signal(df):
     """
-    Devuelve señal solo si se confirma continuidad de la tendencia
+    Devuelve señal SOLO si la tendencia es fuerte y consolidada
     Devuelve: 'call' / 'put' / None
     """
 
-    # 🛑 REQUISITO: Mínimo 8 velas para confirmar tendencia
-    if len(df) < 8:
+    # 🛑 REQUISITO: Más velas para confirmar estructura
+    if len(df) < 15:
         return None
 
     # ======================================
-    # 🔍 PASO 1: ANALIZAR ESTRUCTURA GENERAL
+    # 🔍 PASO 1: DETECTAR TENDENCIA FUERTE
     # ======================================
-    ultimas_8 = df.tail(8).copy()
-    maximos = ultimas_8['high'].values
-    minimos = ultimas_8['low'].values
+    ultimas_12 = df.tail(12).copy()
+    maximos = ultimas_12['high'].values
+    minimos = ultimas_12['low'].values
+    cierres = ultimas_12['close'].values
+    aperturas = ultimas_12['open'].values
 
-    # Detectar tendencia general
-    tendencia = "lateral"
-    if maximos[-1] > maximos[-3] and minimos[-1] > minimos[-3]:
-        tendencia = "alcista"
-    elif maximos[-1] < maximos[-3] and minimos[-1] < minimos[-3]:
-        tendencia = "bajista"
+    # Tendencia alcista fuerte: máximos y mínimos crecientes + cierres en zona alta
+    tendencia_alcista_fuerte = (
+        maximos[-1] > maximos[-2] > maximos[-3] > maximos[-4] and
+        minimos[-1] > minimos[-2] > minimos[-3] > minimos[-4] and
+        cierres[-1] > (maximos[-1] + minimos[-1]) / 2  # Cierra en la mitad superior
+    )
+
+    # Tendencia bajista fuerte: máximos y mínimos decrecientes + cierres en zona baja
+    tendencia_bajista_fuerte = (
+        maximos[-1] < maximos[-2] < maximos[-3] < maximos[-4] and
+        minimos[-1] < minimos[-2] < minimos[-3] < minimos[-4] and
+        cierres[-1] < (maximos[-1] + minimos[-1]) / 2  # Cierra en la mitad inferior
+    )
+
+    # Si no hay tendencia fuerte, no operar
+    if not tendencia_alcista_fuerte and not tendencia_bajista_fuerte:
+        return None
 
     # ======================================
-    # 📊 PASO 2: DETECTAR SECUENCIA DE VELAS
+    # 📊 PASO 2: SECUENCIA DE VELAS (más estricta)
     # ======================================
-    ultimas_5 = df.tail(5).copy()
-    ultimas_5['tipo'] = np.where(ultimas_5['close'] > ultimas_5['open'], 1, -1)
-    secuencia = ultimas_5['tipo'].tolist()
+    ultimas_6 = df.tail(6).copy()
+    ultimas_6['tipo'] = np.where(ultimas_6['close'] > ultimas_6['open'], 1, -1)
+    secuencia = ultimas_6['tipo'].tolist()
 
     # ======================================
-    # 🛡️ FILTROS DE FUERZA
+    # 🛡️ FILTROS DE FUERZA ADICIONALES
     # ======================================
-    df_analisis = df.tail(12).copy()
+    df_analisis = df.tail(15).copy()
     df_analisis['rango'] = df_analisis['high'] - df_analisis['low']
     rango_promedio = df_analisis['rango'].mean()
     volumen_promedio = df_analisis['volume'].mean()
 
-    vela_actual = ultimas_5.iloc[-1]
-    vela_anterior = ultimas_5.iloc[-2]
+    vela_actual = ultimas_6.iloc[-1]
+    vela_anterior = ultimas_6.iloc[-2]
 
-    # 1. Tamaño suficiente de la vela actual
+    # 1. Tamaño de vela: mínimo 80% del promedio
     tamaño_actual = vela_actual['high'] - vela_actual['low']
-    if tamaño_actual < rango_promedio * 0.6:
+    if tamaño_actual < rango_promedio * 0.8:
         return None
 
-    # 2. Volumen mayor o igual al promedio (confirma interés)
-    if vela_actual['volume'] < volumen_promedio * 0.75:
+    # 2. Volumen: mínimo 90% del promedio (confirma interés)
+    if vela_actual['volume'] < volumen_promedio * 0.9:
+        return None
+
+    # 3. Cierre fuerte: más del 70% del cuerpo a favor de la tendencia
+    cuerpo_vela = abs(vela_actual['close'] - vela_actual['open'])
+    rango_vela = vela_actual['high'] - vela_actual['low']
+    if cuerpo_vela < rango_vela * 0.7:
         return None
 
     # ======================================
-    # ✅ EVALUAR CONTINUIDAD
+    # ✅ EVALUACIÓN FINAL
     # ======================================
 
-    # 🟢 CASO 1: Continuidad alcista
-    # 3 o más verdes seguidas, la última también es verde
-    if secuencia[0] == 1 and secuencia[1] == 1 and secuencia[2] == 1 and secuencia[-1] == 1:
-        # Confirmación: cierra por encima del cierre anterior
+    # 🟢 CONTINUIDAD ALCISTA FUERTE
+    if tendencia_alcista_fuerte and secuencia[-4] == 1 and secuencia[-3] == 1 and secuencia[-2] == 1 and secuencia[-1] == 1:
         if vela_actual['close'] > vela_anterior['close']:
-            # Solo si la tendencia general es alcista o lateral
-            if tendencia in ["alcista", "lateral"]:
-                return "call"
+            return "call"
 
-    # 🔴 CASO 2: Continuidad bajista
-    # 3 o más rojas seguidas, la última también es roja
-    if secuencia[0] == -1 and secuencia[1] == -1 and secuencia[2] == -1 and secuencia[-1] == -1:
-        # Confirmación: cierra por debajo del cierre anterior
+    # 🔴 CONTINUIDAD BAJISTA FUERTE
+    if tendencia_bajista_fuerte and secuencia[-4] == -1 and secuencia[-3] == -1 and secuencia[-2] == -1 and secuencia[-1] == -1:
         if vela_actual['close'] < vela_anterior['close']:
-            # Solo si la tendencia general es bajista o lateral
-            if tendencia in ["bajista", "lateral"]:
-                return "put"
+            return "put"
 
-    # ❌ Si no hay continuidad clara: no operar
+    # ❌ No cumple todas las condiciones estrictas
     return None
 
 # ====================================================
