@@ -6,7 +6,7 @@ import sys
 import logging
 from datetime import datetime, UTC
 
-# Importar estrategia de continuidad fuerte
+# Importar estrategia
 from strategy import get_signal
 
 from iqoptionapi.stable_api import IQ_Option
@@ -37,7 +37,7 @@ PAIRS = [
 ]
 
 # 🛑 GESTIÓN DE RIESGO
-MAX_DAILY_TRADES = 8            # Menos operaciones = mayor calidad
+MAX_DAILY_TRADES = 10           # Máximo 10 operaciones por día
 MAX_LOSS_STREAK = 2             # Detener tras 2 pérdidas seguidas
 PAUSE_TIME = 1200               # Pausa 20 minutos tras pérdidas
 MAX_RECONNECT_ATTEMPTS = 5
@@ -49,6 +49,8 @@ CURRENT_DAY = datetime.now(UTC).day
 LOSS_STREAK = 0
 LAST_LOSS = 0
 LAST_SIGNAL = None
+MEJOR_PAR = None
+MEJOR_FUERZA = 0
 
 # ====================================================
 # 📱 ENVÍO DE MENSAJES A TELEGRAM
@@ -68,14 +70,16 @@ def send(msg):
 # 🔄 REINICIO DE CONTADORES DIARIOS
 # ====================================================
 def reset_day():
-    global DAILY_TRADES, CURRENT_DAY, LOSS_STREAK, LAST_SIGNAL
+    global DAILY_TRADES, CURRENT_DAY, LOSS_STREAK, LAST_SIGNAL, MEJOR_PAR, MEJOR_FUERZA
     today = datetime.now(UTC).day
     if today != CURRENT_DAY:
         DAILY_TRADES = 0
         LOSS_STREAK = 0
         LAST_SIGNAL = None
+        MEJOR_PAR = None
+        MEJOR_FUERZA = 0
         CURRENT_DAY = today
-        send("🔄 <b>NUEVO DÍA INICIADO</b> | Buscando tendencias FUERTES.")
+        send("🔄 <b>NUEVO DÍA INICIADO</b> | Buscando la mejor continuidad.")
 
 # ====================================================
 # 🔌 CONEXIÓN A IQ OPTION
@@ -85,7 +89,7 @@ def connect():
     while attempts < MAX_RECONNECT_ATTEMPTS:
         try:
             if not EMAIL or not PASSWORD:
-                send("❌ ERROR: Credenciales no configuradas")
+                send("❌ ERROR: Credenciales IQ_EMAIL o IQ_PASSWORD no configuradas")
                 time.sleep(10)
                 attempts += 1
                 continue
@@ -96,13 +100,13 @@ def connect():
             if status:
                 iq.change_balance("PRACTICE")  # Cambiar a "REAL" cuando estés listo
                 balance = iq.get_balance()
-                send(f"✅ <b>CONECTADO</b> | Saldo: ${balance:.2f}")
+                send(f"✅ <b>BOT CONECTADO</b> | Saldo: ${balance:.2f}")
                 return iq
             else:
-                send(f"❌ Error conexión: {reason} | Intento {attempts+1}/{MAX_RECONNECT_ATTEMPTS}")
+                send(f"❌ Error de conexión: {reason} | Intento {attempts+1}/{MAX_RECONNECT_ATTEMPTS}")
 
         except Exception as e:
-            send(f"❌ Error conexión: {str(e)} | Intento {attempts+1}/{MAX_RECONNECT_ATTEMPTS}")
+            send(f"❌ Error de conexión: {str(e)} | Intento {attempts+1}/{MAX_RECONNECT_ATTEMPTS}")
 
         attempts += 1
         time.sleep(RECONNECT_DELAY)
@@ -122,9 +126,9 @@ def get_df(iq, pair, tf):
             if not iq:
                 return None
 
-        data = iq.get_candles(pair, tf, 60, time.time())  # Más velas para analizar fuerza
+        data = iq.get_candles(pair, tf, 60, time.time())
 
-        if not data or len(data) < 25:
+        if not data or len(data) < 20:
             return None
 
         df = pd.DataFrame(data)
@@ -145,9 +149,10 @@ def get_df(iq, pair, tf):
 # 🧠 BUCLE PRINCIPAL
 # ====================================================
 def main():
-    global LOSS_STREAK, LAST_LOSS, DAILY_TRADES, LAST_SIGNAL
+    global LOSS_STREAK, LAST_LOSS, DAILY_TRADES, LAST_SIGNAL, MEJOR_PAR, MEJOR_FUERZA
     iq = connect()
     last_candle = None
+    senal_pendiente = None
 
     while True:
         try:
@@ -171,9 +176,10 @@ def main():
                 else:
                     LOSS_STREAK = 0
                     LAST_SIGNAL = None
-                    send("✅ Pausa finalizada. Buscando tendencias fuertes...")
+                    senal_pendiente = None
+                    send("✅ Pausa finalizada. Buscando nuevas oportunidades...")
 
-            # ⏱️ TIEMPO DEL SERVIDOR
+            # ⏱️ TIEMPO PRECISO DEL SERVIDOR
             server_time = iq.get_server_timestamp()
             sec = server_time % 60
             current_candle = int(server_time // 60)
@@ -182,51 +188,57 @@ def main():
                 time.sleep(0.1)
                 continue
 
-            # 🔍 ANÁLISIS (segundos 40 a 58)
-            best_pair = None
-            best_signal = None
+            last_candle = current_candle
 
-            if 40 <= sec <= 58:
+            # 🔍 PASO 1: ANALIZAR TODOS LOS PARES Y ELEGIR EL MEJOR
+            mejor_opcion = None
+            mayor_fuerza = 0
+
+            if 40 <= sec <= 55:
                 for pair in PAIRS:
                     df = get_df(iq, pair, TIMEFRAME_M1)
                     if df is None:
                         continue
 
                     try:
-                        signal = get_signal(df)
+                        resultado = get_signal(df)
+                        if resultado is not None:
+                            signal, fuerza = resultado
+                            if fuerza > mayor_fuerza:
+                                mayor_fuerza = fuerza
+                                mejor_opcion = (pair, signal, fuerza)
                     except Exception as e:
                         continue
 
-                    if signal in ["call", "put"]:
-                        if (pair, signal) != LAST_SIGNAL:
-                            best_pair = pair
-                            best_signal = signal
-                            LAST_SIGNAL = (best_pair, best_signal)
-                            send(f"""🎯 <b>TENDENCIA FUERTE DETECTADA</b>
+                # Guardar la mejor opción para ejecutarla en la siguiente vela
+                if mejor_opcion and mayor_fuerza >= 60:  # Solo fuerza mínima aceptable
+                    pair, signal, fuerza = mejor_opcion
+                    if (pair, signal) != LAST_SIGNAL:
+                        senal_pendiente = mejor_opcion
+                        LAST_SIGNAL = (pair, signal)
+                        send(f"""🎯 <b>CONTINUIDAD DETECTADA - SE EJECUTARÁ EN SIGUIENTE VELA</b>
 💹 Activo: {pair}
-📊 Dirección: {'🟢 ALCISTA FUERTE' if signal == 'call' else '🔴 BAJISTA FUERTE'}""")
-                            break
+📊 Dirección: {'🟢 ALCISTA FUERTE' if signal == 'call' else '🔴 BAJISTA FUERTE'}
+💪 Fuerza: {fuerza}/100""")
 
-            # ⚡ EJECUCIÓN
-            if 59.2 <= sec <= 59.98:
-                if not best_pair or not best_signal:
-                    time.sleep(0.1)
-                    continue
+            # ⚡ PASO 2: EJECUTAR LA SEÑAL PENDIENTE AL CIERRE DE VELA
+            if 57 <= sec <= 59.98 and senal_pendiente is not None:
+                pair, signal, fuerza = senal_pendiente
 
-                last_candle = current_candle
-
-                status, trade_id = iq.buy(BASE_AMOUNT, best_pair, best_signal, EXPIRATION)
+                status, trade_id = iq.buy(BASE_AMOUNT, pair, signal, EXPIRATION)
 
                 if status:
                     DAILY_TRADES += 1
-                    tipo = "🟢 <b>COMPRA - CONTINUIDAD FUERTE</b>" if best_signal == "call" else "🔴 <b>VENTA - CONTINUIDAD FUERTE</b>"
+                    tipo = "🟢 <b>COMPRA - CONTINUIDAD FUERTE</b>" if signal == "call" else "🔴 <b>VENTA - CONTINUIDAD FUERTE</b>"
                     send(f"""🚀 <b>OPERACIÓN EJECUTADA</b>
-💹 Activo: {best_pair}
+💹 Activo: {pair}
 📈 Tipo: {tipo}
 💲 Monto: ${BASE_AMOUNT:.2f}
 🔄 #Op: {DAILY_TRADES}/{MAX_DAILY_TRADES}""")
 
+                    senal_pendiente = None
                     time.sleep(65)
+
                     try:
                         res = iq.check_win_v4(trade_id)
                         if res is None:
@@ -244,7 +256,8 @@ def main():
                     except Exception as e:
                         send(f"⚠️ Error al verificar: {str(e)}")
                 else:
-                    send(f"❌ No se pudo ejecutar operación")
+                    send(f"❌ No se pudo ejecutar operación en {pair}")
+                    senal_pendiente = None
 
             time.sleep(0.05)
 
