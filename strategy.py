@@ -2,106 +2,102 @@ import numpy as np
 import pandas as pd
 
 # ==================================================
-# 🚀 ESTRATEGIA: SOLO CONTINUIDAD EN TENDENCIA FUERTE
-# ✅ LÓGICA ESTRICTA:
-# 1. Requiere tendencia consolidada (máximos/mínimos crecientes/decrecientes)
-# 2. Secuencia mínima: 4 velas seguidas del mismo color (no 3)
-# 3. Filtros de fuerza: tamaño, volumen y velocidad del movimiento
-# 4. DESCARTAR mercados laterales o sin fuerza
-# ✅ REGLAS:
-#    → 4+ VERDES + estructura alcista fuerte = COMPRA
-#    → 4+ ROJAS + estructura bajista fuerte = VENTA
+# 🚀 ESTRATEGIA: CONTINUIDAD FUERTE - VERSIÓN EQUILIBRADA
+# ✅ CAMBIOS CLAVE:
+# - De 4 a 3 velas seguidas (más natural en mercado)
+# - Filtros de volumen/tamaño menos estrictos
+# - Sigue priorizando tendencia fuerte
 # ==================================================
 
 def get_signal(df):
     """
-    Devuelve señal SOLO si la tendencia es fuerte y consolidada
-    Devuelve: 'call' / 'put' / None
+    Devuelve (señal, fuerza) o None
     """
-
-    # 🛑 REQUISITO: Más velas para confirmar estructura
-    if len(df) < 15:
+    if len(df) < 12:
         return None
 
     # ======================================
-    # 🔍 PASO 1: DETECTAR TENDENCIA FUERTE
+    # 🔍 ANÁLISIS DE TENDENCIA
     # ======================================
-    ultimas_12 = df.tail(12).copy()
-    maximos = ultimas_12['high'].values
-    minimos = ultimas_12['low'].values
-    cierres = ultimas_12['close'].values
-    aperturas = ultimas_12['open'].values
+    ultimas_10 = df.tail(10).copy()
+    maximos = ultimas_10['high'].values
+    minimos = ultimas_10['low'].values
+    cierres = ultimas_10['close'].values
 
-    # Tendencia alcista fuerte: máximos y mínimos crecientes + cierres en zona alta
-    tendencia_alcista_fuerte = (
-        maximos[-1] > maximos[-2] > maximos[-3] > maximos[-4] and
-        minimos[-1] > minimos[-2] > minimos[-3] > minimos[-4] and
-        cierres[-1] > (maximos[-1] + minimos[-1]) / 2  # Cierra en la mitad superior
+    fuerza = 0
+
+    # Tendencia alcista fuerte
+    tendencia_alcista = (
+        maximos[-1] > maximos[-3] and
+        minimos[-1] > minimos[-3] and
+        cierres[-1] > cierres[-4]
     )
 
-    # Tendencia bajista fuerte: máximos y mínimos decrecientes + cierres en zona baja
-    tendencia_bajista_fuerte = (
-        maximos[-1] < maximos[-2] < maximos[-3] < maximos[-4] and
-        minimos[-1] < minimos[-2] < minimos[-3] < minimos[-4] and
-        cierres[-1] < (maximos[-1] + minimos[-1]) / 2  # Cierra en la mitad inferior
+    # Tendencia bajista fuerte
+    tendencia_bajista = (
+        maximos[-1] < maximos[-3] and
+        minimos[-1] < minimos[-3] and
+        cierres[-1] < cierres[-4]
     )
 
-    # Si no hay tendencia fuerte, no operar
-    if not tendencia_alcista_fuerte and not tendencia_bajista_fuerte:
+    if not tendencia_alcista and not tendencia_bajista:
         return None
 
-    # ======================================
-    # 📊 PASO 2: SECUENCIA DE VELAS (más estricta)
-    # ======================================
-    ultimas_6 = df.tail(6).copy()
-    ultimas_6['tipo'] = np.where(ultimas_6['close'] > ultimas_6['open'], 1, -1)
-    secuencia = ultimas_6['tipo'].tolist()
+    fuerza += 30
 
     # ======================================
-    # 🛡️ FILTROS DE FUERZA ADICIONALES
+    # 📊 SECUENCIA DE VELAS (3 seguidas ahora)
     # ======================================
-    df_analisis = df.tail(15).copy()
+    ultimas_5 = df.tail(5).copy()
+    ultimas_5['tipo'] = np.where(ultimas_5['close'] > ultimas_5['open'], 1, -1)
+    secuencia = ultimas_5['tipo'].tolist()
+
+    # ======================================
+    # 🛡️ FILTROS MÁS FLEXIBLES
+    # ======================================
+    df_analisis = df.tail(12).copy()
     df_analisis['rango'] = df_analisis['high'] - df_analisis['low']
     rango_promedio = df_analisis['rango'].mean()
     volumen_promedio = df_analisis['volume'].mean()
 
-    vela_actual = ultimas_6.iloc[-1]
-    vela_anterior = ultimas_6.iloc[-2]
+    v1 = ultimas_5.iloc[-1]
+    v2 = ultimas_5.iloc[-2]
+    v3 = ultimas_5.iloc[-3]
 
-    # 1. Tamaño de vela: mínimo 80% del promedio
-    tamaño_actual = vela_actual['high'] - vela_actual['low']
-    if tamaño_actual < rango_promedio * 0.8:
+    # Tamaño de vela: mínimo 60% del promedio (antes 80%)
+    tamaño_prom = ((v1.high - v1.low)+(v2.high - v2.low)+(v3.high - v3.low)) / 3
+    if tamaño_prom < rango_promedio * 0.6:
         return None
+    fuerza += 20
 
-    # 2. Volumen: mínimo 90% del promedio (confirma interés)
-    if vela_actual['volume'] < volumen_promedio * 0.9:
+    # Volumen: mínimo 70% del promedio (antes 90%)
+    vol_prom = (v1.volume + v2.volume + v3.volume) / 3
+    if vol_prom < volumen_promedio * 0.7:
         return None
+    fuerza += 15
 
-    # 3. Cierre fuerte: más del 70% del cuerpo a favor de la tendencia
-    cuerpo_vela = abs(vela_actual['close'] - vela_actual['open'])
-    rango_vela = vela_actual['high'] - vela_actual['low']
-    if cuerpo_vela < rango_vela * 0.7:
+    # Cuerpo: mínimo 50% del rango (antes 70%)
+    cuerpo_prom = (abs(v1.close - v1.open)+abs(v2.close - v2.open)+abs(v3.close - v3.open)) / 3
+    if cuerpo_prom < tamaño_prom * 0.5:
         return None
+    fuerza += 15
 
     # ======================================
-    # ✅ EVALUACIÓN FINAL
+    # ✅ DEFINIR SEÑAL
     # ======================================
+    if tendencia_alcista and secuencia[-3] == 1 and secuencia[-2] == 1 and secuencia[-1] == 1:
+        fuerza += 20
+        return ("call", min(fuerza, 100))
 
-    # 🟢 CONTINUIDAD ALCISTA FUERTE
-    if tendencia_alcista_fuerte and secuencia[-4] == 1 and secuencia[-3] == 1 and secuencia[-2] == 1 and secuencia[-1] == 1:
-        if vela_actual['close'] > vela_anterior['close']:
-            return "call"
+    if tendencia_bajista and secuencia[-3] == -1 and secuencia[-2] == -1 and secuencia[-1] == -1:
+        fuerza += 20
+        return ("put", min(fuerza, 100))
 
-    # 🔴 CONTINUIDAD BAJISTA FUERTE
-    if tendencia_bajista_fuerte and secuencia[-4] == -1 and secuencia[-3] == -1 and secuencia[-2] == -1 and secuencia[-1] == -1:
-        if vela_actual['close'] < vela_anterior['close']:
-            return "put"
-
-    # ❌ No cumple todas las condiciones estrictas
     return None
 
 # ====================================================
 # 🔄 Alias de compatibilidad
 # ====================================================
 def pro_signal(df):
-    return get_signal(df)
+    res = get_signal(df)
+    return res[0] if res else None
