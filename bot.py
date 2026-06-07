@@ -18,7 +18,7 @@ logging.basicConfig(
 )
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN GENERAL
+# ⚙️ CONFIGURACIÓN ULTRA EXIGENTE
 # ==========================================
 EMAIL = os.getenv("IQ_EMAIL")
 PASSWORD = os.getenv("IQ_PASSWORD")
@@ -29,17 +29,17 @@ EXPIRATION = 1
 BASE_AMOUNT = 25
 TIMEFRAME_M1 = 60
 
+# Activos más estables y con menor ruido
 PAIRS = [
-    "EURUSD-OTC", "GBPUSD-OTC", "USDCHF-OTC",
-    "EURGBP-OTC", "EURJPY-OTC", "GBPJPY-OTC"
+    "EURUSD-OTC", "GBPUSD-OTC", "EURGBP-OTC"
 ]
 
-MAX_DAILY_TRADES = 8
-MAX_LOSS_STREAK = 2
-PAUSE_TIME = 1800
+MAX_DAILY_TRADES = 4          # Máximo 4 operaciones por día
+MAX_LOSS_STREAK = 1           # Se detiene después de 1 sola pérdida
+PAUSE_TIME = 2400             # Pausa de 40 minutos tras pérdida
 MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_DELAY = 5
-FUERZA_MINIMA = 55
+FUERZA_MINIMA = 75            # ✅ Solo señales de 75/100 en adelante
 
 DAILY_TRADES = 0
 CURRENT_DAY = datetime.now(timezone.utc).day
@@ -62,12 +62,13 @@ def send(msg):
             logging.error(f"Error Telegram: {str(e)}")
 
 # ====================================================
-# ⏰ HORARIO DE OPERACIÓN
+# ⏰ HORARIO DE OPERACIÓN SOLO DE ALTA LIQUIDEZ
 # ====================================================
 def es_hora_optima():
     hora_utc = datetime.now(timezone.utc).hour
     hora_bogota = hora_utc - 5
-    return 2 <= hora_bogota <= 12
+    # Solo opera en horario europeo y apertura de EE.UU: mayor volumen y tendencia clara
+    return 4 <= hora_bogota <= 11
 
 # ====================================================
 # 🔄 REINICIO DIARIO
@@ -80,7 +81,7 @@ def reset_day():
         LOSS_STREAK = 0
         LAST_TRADE = None
         CURRENT_DAY = today
-        send("🔄 <b>NUEVO DÍA INICIADO</b> | Buscando puntos de alta probabilidad.")
+        send("🔄 <b>NUEVO DÍA INICIADO</b> | Buscando señales de MÁXIMA PRECISIÓN.")
 
 # ====================================================
 # 🔌 CONEXIÓN IQ OPTION
@@ -126,8 +127,8 @@ def get_df(iq, pair):
             if not iq:
                 return None
 
-        data = iq.get_candles(pair, TIMEFRAME_M1, 50, time.time())
-        if not data or len(data) < 25:
+        data = iq.get_candles(pair, TIMEFRAME_M1, 60, time.time())
+        if not data or len(data) < 30:
             return None
 
         df = pd.DataFrame(data)
@@ -161,18 +162,20 @@ def main():
                 continue
 
             if DAILY_TRADES >= MAX_DAILY_TRADES:
-                time.sleep(60)
+                send("ℹ️ Límite diario de operaciones alcanzado.")
+                time.sleep(300)
                 continue
 
             if LOSS_STREAK >= MAX_LOSS_STREAK:
                 remaining = int(PAUSE_TIME - (time.time() - LAST_LOSS))
                 if remaining > 0:
-                    time.sleep(10)
+                    send(f"⏸️ Pausa de seguridad activa: {remaining//60} minutos restantes.")
+                    time.sleep(60)
                     continue
                 else:
                     LOSS_STREAK = 0
                     LAST_TRADE = None
-                    send("✅ Pausa finalizada. Buscando nuevas entradas...")
+                    send("✅ Pausa finalizada. Buscando señales premium...")
 
             server_time = iq.get_server_timestamp()
             sec = server_time % 60
@@ -186,7 +189,7 @@ def main():
             mejor_opcion = None
             mayor_fuerza = 0
 
-            if 35 <= sec <= 55:
+            if 40 <= sec <= 55:
                 for pair in PAIRS:
                     df = get_df(iq, pair)
                     if df is None:
@@ -206,7 +209,7 @@ def main():
                     continue
                 LAST_TRADE = (pair, signal)
 
-                send(f"""🎯 <b>PUNTO DE ALTA PROBABILIDAD</b>
+                send(f"""🎯 <b>SEÑAL PREMIUM</b>
 💹 Activo: {pair}
 📈 Tendencia: {direccion.upper()}
 💪 Fuerza: {fuerza}/100
@@ -231,7 +234,7 @@ def main():
                         if res < 0:
                             LOSS_STREAK += 1
                             LAST_LOSS = time.time()
-                            send(f"❌ <b>PÉRDIDA</b> | -${abs(res):.2f}\n⚠️ Rachas: {LOSS_STREAK}/{MAX_LOSS_STREAK}")
+                            send(f"❌ <b>PÉRDIDA</b> | -${abs(res):.2f}\n⚠️ Activando pausa de seguridad.")
                         else:
                             LOSS_STREAK = 0
                             send(f"✅ <b>GANANCIA</b> | +${res:.2f}\n_________________________")
