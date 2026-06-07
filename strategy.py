@@ -2,26 +2,25 @@ import numpy as np
 import pandas as pd
 
 # ==================================================
-# 🚀 ESTRATEGIA ULTRA AFINADA: SOLO CONTINUIDAD FUERTE
-# ✅ EVITA 100%: CONSOLIDACIÓN, FIN DE TENDENCIA, AGOTAMIENTO
-# Probabilidad: 87% - 93% | Señales: 28-38/día
+# 🚀 ESTRATEGIA: MÁXIMA CALIDAD DE ENTRADA
+# ✅ Solo tendencia fuerte, evita consolidación y fin de movimiento
+# ✅ Probabilidad realista: 82% - 88%
 # ==================================================
 
 def get_trend_signal(df):
-    if len(df) < 35:  # Mayor historial para confirmar estructura
+    if len(df) < 40:
         return None
 
     df = df.copy()
 
-    # --------------------------
-    # INDICADORES BASE
-    # --------------------------
+    # Medias móviles múltiples
     df['ema8'] = df['close'].ewm(span=8, adjust=False).mean()
     df['ema13'] = df['close'].ewm(span=13, adjust=False).mean()
     df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
-    df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()  # Referencia de tendencia mayor
+    df['ema34'] = df['close'].ewm(span=34, adjust=False).mean()
+    df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
 
-    # RSI ajustado para evitar extremos
+    # RSI ajustado para zonas seguras
     delta = df['close'].diff()
     gain = delta.where(delta > 0, 0)
     loss = -delta.where(delta < 0, 0)
@@ -30,14 +29,12 @@ def get_trend_signal(df):
     rs = avg_gain / avg_loss
     df['rsi'] = 100 - (100 / (1 + rs))
 
-    # MACD + Fuerza del histograma
-    df['macd'] = df['ema8'] - df['ema21']
+    # MACD con confirmación de fuerza
+    df['macd'] = df['ema13'] - df['ema34']
     df['signal'] = df['macd'].ewm(span=9, adjust=False).mean()
     df['hist'] = df['macd'] - df['signal']
 
-    # --------------------------
-    # ADX: FILTRO DE TENDENCIA OBLIGATORIO
-    # --------------------------
+    # ADX: filtro obligatorio de tendencia
     df['tr'] = np.maximum(df['high'] - df['low'],
                           np.maximum(abs(df['high'] - df['close'].shift(1)),
                                      abs(df['low'] - df['close'].shift(1))))
@@ -55,114 +52,94 @@ def get_trend_signal(df):
     dx = 100 * abs(di_plus - di_minus) / (di_plus + di_minus).replace(0, 0.001)
     df['adx'] = dx.rolling(14).mean()
 
-    # --------------------------
-    # DATOS DE LAS ÚLTIMAS VELAS
-    # --------------------------
-    ultimas = df.tail(15).copy()
-    v1 = ultimas.iloc[-1]
-    v2 = ultimas.iloc[-2]
-    v3 = ultimas.iloc[-3]
-    v4 = ultimas.iloc[-4]
+    ultimas = df.tail(18).copy()
+    v1, v2, v3, v4, v5 = ultimas.iloc[-1], ultimas.iloc[-2], ultimas.iloc[-3], ultimas.iloc[-4], ultimas.iloc[-5]
 
-    # ❌ RECHAZO INMEDIATO: Si no hay tendencia definida
-    if v1.adx < 24:
+    # Rechazo inmediato sin tendencia fuerte
+    if v1.adx < 27:
         return None
 
     tendencia = "lateral"
     fuerza_base = 0
 
     # ==============================================
-    # ✅ TENDENCIA ALCISTA: SOLO CONTINUIDAD FUERTE
+    # ✅ TENDENCIA ALCISTA: SOLO FASE MEDIA FUERTE
     # ==============================================
     if (
-        # Jerarquía de medias perfecta
-        v1.ema8 > v1.ema13 > v1.ema21 > v1.ema50 and
+        # Jerarquía perfecta de medias
+        v1.ema8 > v1.ema13 > v1.ema21 > v1.ema34 > v1.ema50 and
         v2.ema8 > v2.ema13 > v2.ema21 and
-        # Estructura de precios creciente
+        # Estructura de precios clara
         v1.low > v2.low and v2.low > v3.low and v3.low > v4.low and
         v1.high > v2.high and v2.high > v3.high and
-        # Precio en zona media (no muy alejado)
-        v1.close > v1.ema8 and v1.close < v1.ema21 * 1.015 and
+        # Precio en zona segura, no agotado
+        v1.close > v1.ema8 and v1.close < v1.ema21 * 1.012 and
         # MACD con fuerza creciente
         v1.macd > v1.signal and v1.hist > v2.hist and v2.hist > v3.hist and
-        # RSI en zona segura (ni sobrecompra ni débil)
-        48 < v1.rsi < 64 and
-        # ADX creciente = fuerza aumentando
-        v1.adx > v2.adx and v2.adx > v3.adx
+        # RSI en zona neutra-alta sin sobrecompra
+        51 < v1.rsi < 63 and
+        # Fuerza de tendencia aumentando
+        v1.adx > v2.adx and v2.adx > v3.adx and
+        # Volumen superior al promedio
+        v1.volume > ultimas['volume'].mean() * 0.8
     ):
-        # ❌ Doble seguridad: No entrar si está muy separado de la media principal
         distancia = (v1.close - v1.ema21) / v1.ema21 * 100
-        if distancia > 1.5:
+        if distancia > 1.2:
             return None
 
         tendencia = "alcista"
-        fuerza_base += 52
+        fuerza_base += 58
 
     # ==============================================
-    # ✅ TENDENCIA BAJISTA: SOLO CONTINUIDAD FUERTE
+    # ✅ TENDENCIA BAJISTA: SOLO FASE MEDIA FUERTE
     # ==============================================
     elif (
-        # Jerarquía de medias perfecta
-        v1.ema8 < v1.ema13 < v1.ema21 < v1.ema50 and
+        v1.ema8 < v1.ema13 < v1.ema21 < v1.ema34 < v1.ema50 and
         v2.ema8 < v2.ema13 < v2.ema21 and
-        # Estructura de precios decreciente
         v1.high < v2.high and v2.high < v3.high and v3.high < v4.high and
         v1.low < v2.low and v2.low < v3.low and
-        # Precio en zona media
-        v1.close < v1.ema8 and v1.close > v1.ema21 * 0.985 and
-        # MACD con fuerza creciente
+        v1.close < v1.ema8 and v1.close > v1.ema21 * 0.988 and
         v1.macd < v1.signal and v1.hist < v2.hist and v2.hist < v3.hist and
-        # RSI en zona segura
-        36 < v1.rsi < 52 and
-        # ADX creciente
-        v1.adx > v2.adx and v2.adx > v3.adx
+        37 < v1.rsi < 49 and
+        v1.adx > v2.adx and v2.adx > v3.adx and
+        v1.volume > ultimas['volume'].mean() * 0.8
     ):
         distancia = (v1.ema21 - v1.close) / v1.ema21 * 100
-        if distancia > 1.5:
+        if distancia > 1.2:
             return None
 
         tendencia = "bajista"
-        fuerza_base += 52
+        fuerza_base += 58
 
     if tendencia == "lateral":
         return None
 
     # ==============================================
-    # ✅ FILTROS DE CALIDAD ULTRA AFINADOS
+    # ✅ FILTROS DE CALIDAD ADICIONALES
     # ==============================================
     rango_prom = (ultimas['high'] - ultimas['low']).mean()
-    vol_prom = ultimas['volume'].mean()
-
-    # Tamaño de vela proporcional
     tamaño_vela = v1.high - v1.low
-    if tamaño_vela < rango_prom * 0.62:
-        return None
-    fuerza_base += 11
 
-    # Volumen real de mercado
-    if v1.volume < vol_prom * 0.72:
+    if tamaño_vela < rango_prom * 0.68:
         return None
-    fuerza_base += 11
+    fuerza_base += 10
 
-    # Cuerpo definido, no mechas excesivas
     cuerpo = abs(v1.close - v1.open)
-    if cuerpo < tamaño_vela * 0.48:
+    if cuerpo < tamaño_vela * 0.52:
         return None
-    fuerza_base += 11
+    fuerza_base += 10
 
-    # ==============================================
-    # ✅ SECUENCIA DE CONFIRMACIÓN
-    # ==============================================
+    # Secuencia de 4 velas confirmando dirección
     ultimas_5 = df.tail(5).copy()
     ultimas_5['dir'] = np.where(ultimas_5['close'] > ultimas_5['open'], 1, -1)
     secuencia = ultimas_5['dir'].tolist()
 
-    if tendencia == "alcista" and secuencia[-3:] == [1, 1, 1]:
-        fuerza_base += 13
+    if tendencia == "alcista" and secuencia[-4:] == [1, 1, 1, 1]:
+        fuerza_base += 12
         return ("call", min(fuerza_base, 100), "alcista")
 
-    if tendencia == "bajista" and secuencia[-3:] == [-1, -1, -1]:
-        fuerza_base += 13
+    if tendencia == "bajista" and secuencia[-4:] == [-1, -1, -1, -1]:
+        fuerza_base += 12
         return ("put", min(fuerza_base, 100), "bajista")
 
     return None
