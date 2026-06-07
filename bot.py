@@ -8,6 +8,7 @@ import threading
 import logging
 from datetime import datetime, timezone
 
+# Importación correcta de la función
 from strategy import get_trend_signal
 from iqoptionapi.stable_api import IQ_Option
 
@@ -17,7 +18,7 @@ logging.basicConfig(
 )
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN
+# ⚙️ CONFIGURACIÓN PRINCIPAL
 # ==========================================
 EMAIL = os.getenv("IQ_EMAIL")
 PASSWORD = os.getenv("IQ_PASSWORD")
@@ -49,7 +50,7 @@ LAST_TRADE = None
 BOT_RUNNING = False
 
 # ====================================================
-# 📱 TELEGRAM
+# 📱 FUNCIONES TELEGRAM
 # ====================================================
 def send(msg):
     if TOKEN and CHAT_ID:
@@ -293,3 +294,4 @@ if __name__ == "__main__":
     if missing:
         print(f"❌ Faltan variables de entorno: {', '.join(missing)}")
         sys.exit(1)
+    main()
