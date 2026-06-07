@@ -4,7 +4,7 @@ import requests
 import pandas as pd
 import sys
 import logging
-from datetime import datetime
+from datetime import datetime, UTC
 
 # ✅ Importamos la estrategia de estructura
 from strategy import get_signal
@@ -27,7 +27,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # ⚙️ PARÁMETROS DE OPERACIÓN
 EXPIRATION = 1                  # ⏱️ EXPIRACIÓN: 1 MINUTO
-BASE_AMOUNT = 64                # 💰 MONTO POR OPERACIÓN
+BASE_AMOUNT = 10                # 💰 MONTO POR OPERACIÓN
 TIMEFRAME_M1 = 60               # 🕯️ VELAS DE 1 MINUTO
 
 # 🎯 ACTIVOS OTC
@@ -45,7 +45,7 @@ RECONNECT_DELAY = 5             # Tiempo entre intentos
 
 # 🚦 VARIABLES GLOBALES
 DAILY_TRADES = 0
-CURRENT_DAY = datetime.utcnow().day
+CURRENT_DAY = datetime.now(UTC).day
 LOSS_STREAK = 0
 LAST_LOSS = 0
 LAST_CANDLE_TIME = 0           # Control por tiempo exacto de vela
@@ -70,7 +70,7 @@ def send(msg):
 # ====================================================
 def reset_day():
     global DAILY_TRADES, CURRENT_DAY, LOSS_STREAK
-    today = datetime.utcnow().day
+    today = datetime.now(UTC).day
     if today != CURRENT_DAY:
         DAILY_TRADES = 0
         LOSS_STREAK = 0
