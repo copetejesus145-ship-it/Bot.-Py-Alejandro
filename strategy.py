@@ -3,10 +3,12 @@ import numpy as np
 
 def get_signal(df):
     """
-    Estrategia EQUILIBRADA: Más operaciones + buen porcentaje de aciertos
-    Expiración: 1 minuto
+    ESTRATEGIA DE CICLOS: Detecta agotamiento + cambio de tendencia
+    ✅ Entra como en la operación ganadora de tu imagen
+    ✅ Bloquea entradas en retrocesos sin cambio real
+    ✅ Mide fuerza, agotamiento y confirmación
     """
-    if df is None or len(df) < 20:
+    if df is None or len(df) < 40:
         return None, 0
 
     data = df.copy()
@@ -14,86 +16,93 @@ def get_signal(df):
     # ======================================
     # INDICADORES
     # ======================================
-    data['ma_rapida'] = data['close'].rolling(window=4).mean()
-    data['ma_lenta'] = data['close'].rolling(window=12).mean()
+    data['ma_corta'] = data['close'].rolling(4).mean()
+    data['ma_media'] = data['close'].rolling(10).mean()
+    data['ma_larga'] = data['close'].rolling(20).mean()
     
     data['rango'] = data['high'] - data['low']
-    rango_promedio = data['rango'].rolling(window=10).mean()
-    
+    rango_prom = data['rango'].rolling(20).mean()
     data['cuerpo'] = abs(data['close'] - data['open'])
-    # Bajamos el requisito de fuerza
-    data['fuerza'] = np.where(data['cuerpo'] > rango_promedio * 0.25, 1, 0)
+    data['fuerza'] = np.where(data['cuerpo'] > rango_prom * 0.35, 1, 0)
+    
+    data['direccion'] = np.where(data['close'] > data['open'], 1, -1)
+    data['fuerza_acumulada'] = data['direccion'] * data['cuerpo']
+    data['tendencia_fuerza'] = data['fuerza_acumulada'].rolling(8).sum()
 
-    # Últimas 4 velas
-    ultimas = data.tail(4).copy()
-    if len(ultimas) < 4:
+    # Últimas 10 velas para ver ciclo completo
+    ultimas = data.tail(10).copy()
+    if len(ultimas) < 10:
         return None, 0
 
-    vela_3 = ultimas.iloc[0]
-    vela_2 = ultimas.iloc[1]
-    vela_1 = ultimas.iloc[2]
-    vela_actual = ultimas.iloc[3]
-
-    # Niveles clave
-    resistencia = max(vela_3['high'], vela_2['high'], vela_1['high'])
-    soporte = min(vela_3['low'], vela_2['low'], vela_1['low'])
-
-    confianza = 0
+    v10, v9, v8, v7, v6, v5, v4, v3, v2, v1 = ultimas.iloc[:10].values
+    actual = ultimas.iloc[-1]
 
     # ======================================
-    # CONDICIONES DE COMPRA (CALL)
+    # DETECTAR AGOTAMIENTO DE TENDENCIA
     # ======================================
-    condicion_call = False
+    # Agotamiento bajista (como en tu operación ganadora)
+    agotamiento_bajista = (
+        actual['tendencia_fuerza'] < -rango_prom * 3  # Bajada muy fuerte acumulada
+        and abs(actual['cuerpo']) < rango_prom * 0.25  # Última vela sin fuerza
+        and v2['low'] <= v3['low'] <= v4['low']  # Mínimos sucesivos
+    )
+
+    # Agotamiento alcista
+    agotamiento_alcista = (
+        actual['tendencia_fuerza'] > rango_prom * 3
+        and abs(actual['cuerpo']) < rango_prom * 0.25
+        and v2['high'] >= v3['high'] >= v4['high']
+    )
+
+    # ======================================
+    # NIVELES CLAVE
+    # ======================================
+    resistencia = max(v10[1], v9[1], v8[1], v7[1], v6[1], v5[1], v4[1], v3[1])
+    soporte = min(v10[2], v9[2], v8[2], v7[2], v6[2], v5[2], v4[2], v3[2])
+
+    # ======================================
+    # CONDICIONES DE COMPRA (CALL) - COMO EN TU GANADORA
+    # ======================================
+    if agotamiento_bajista:
+        # Buscamos: cambio de dirección + fuerza + retroceso pequeño
+        velas_alcistas = sum(1 for v in [v3, v2, actual] if v['direccion'] == 1)
+        if (
+            velas_alcistas >= 2
+            and actual['fuerza'] == 1
+            and actual['close'] > v2['high']  # Supera el retroceso
+            and actual['ma_corta'] > actual['ma_media']
+        ):
+            return "call", 85
+
+    # Compra por ruptura normal
     if (
-        # Rechazo en soporte
-        (vela_actual['low'] <= soporte and
-         vela_actual['close'] > vela_actual['open'] and
-         vela_actual['fuerza'] == 1)
-        or
-        # Ruptura de resistencia
-        (vela_actual['close'] > resistencia and
-         vela_actual['ma_rapida'] > vela_actual['ma_lenta'])
-        or
-        # Continuación de tendencia alcista
-        (vela_actual['close'] > vela_actual['open'] and
-         vela_1['close'] > vela_1['open'] and
-         vela_actual['close'] > vela_actual['ma_rapida'])
+        not agotamiento_alcista
+        and actual['close'] > resistencia
+        and actual['fuerza'] == 1
+        and actual['ma_corta'] > actual['ma_larga']
     ):
-        condicion_call = True
-        confianza = 65
-        if vela_actual['ma_rapida'] > vela_actual['ma_lenta']:
-            confianza += 10
+        return "call", 78
 
     # ======================================
     # CONDICIONES DE VENTA (PUT)
     # ======================================
-    condicion_put = False
-    if (
-        # Rechazo en resistencia
-        (vela_actual['high'] >= resistencia and
-         vela_actual['close'] < vela_actual['open'] and
-         vela_actual['fuerza'] == 1)
-        or
-        # Ruptura de soporte
-        (vela_actual['close'] < soporte and
-         vela_actual['ma_rapida'] < vela_actual['ma_lenta'])
-        or
-        # Continuación de tendencia bajista
-        (vela_actual['close'] < vela_actual['open'] and
-         vela_1['close'] < vela_1['open'] and
-         vela_actual['close'] < vela_actual['ma_rapida'])
-    ):
-        condicion_put = True
-        confianza = 65
-        if vela_actual['ma_rapida'] < vela_actual['ma_lenta']:
-            confianza += 10
+    if agotamiento_alcista:
+        velas_bajistas = sum(1 for v in [v3, v2, actual] if v['direccion'] == -1)
+        if (
+            velas_bajistas >= 2
+            and actual['fuerza'] == 1
+            and actual['close'] < v2['low']
+            and actual['ma_corta'] < actual['ma_media']
+        ):
+            return "put", 85
 
-    # ======================================
-    # RESULTADO
-    # ======================================
-    if condicion_call and not condicion_put:
-        return "call", min(confianza, 90)
-    elif condicion_put and not condicion_call:
-        return "put", min(confianza, 90)
-    else:
-        return None, 0
+    # Venta por ruptura normal
+    if (
+        not agotamiento_bajista
+        and actual['close'] < soporte
+        and actual['fuerza'] == 1
+        and actual['ma_corta'] < actual['ma_larga']
+    ):
+        return "put", 78
+
+    return None, 0
