@@ -11,7 +11,7 @@ from strategy import get_signal
 
 from iqoptionapi.stable_api import IQ_Option
 
-# Configuración de logging mejorada (solo errores críticos visibles)
+# Configuración de logging mejorada
 logging.basicConfig(
     level=logging.CRITICAL,
     format="%(asctime)s - %(levelname)s - %(message)s"
@@ -27,10 +27,10 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # ⚙️ PARÁMETROS DE OPERACIÓN
 EXPIRATION = 1                  # ⏱️ EXPIRACIÓN: 1 MINUTO
-BASE_AMOUNT = 64               # 💰 MONTO POR OPERACIÓN
+BASE_AMOUNT = 64                # 💰 MONTO POR OPERACIÓN
 TIMEFRAME_M1 = 60               # 🕯️ VELAS DE 1 MINUTO
 
-# 🎯 ACTIVOS OTC (Tus pares)
+# 🎯 ACTIVOS OTC
 PAIRS = [
     "EURUSD-OTC", "GBPUSD-OTC", "USDCHF-OTC", 
     "EURGBP-OTC", "EURJPY-OTC", "GBPJPY-OTC"
@@ -48,6 +48,7 @@ DAILY_TRADES = 0
 CURRENT_DAY = datetime.utcnow().day
 LOSS_STREAK = 0
 LAST_LOSS = 0
+LAST_TRADE_MINUTE = -1          # Control para no repetir operación
 
 # ====================================================
 #   📱 ENVÍO DE MENSAJES A TELEGRAM
@@ -76,7 +77,7 @@ def reset_day():
         send("🔄 <b>NUEVO DÍA INICIADO</b> | Contadores reiniciados.")
 
 # ====================================================
-#   🔌 CONEXIÓN A IQ OPTION (CORREGIDA)
+#   🔌 CONEXIÓN A IQ OPTION
 # ====================================================
 def connect():
     attempts = 0
@@ -86,18 +87,14 @@ def connect():
             if not EMAIL or not PASSWORD:
                 send("❌ ERROR: Credenciales IQ_EMAIL o IQ_PASSWORD no configuradas")
                 time.sleep(10)
-                attempts +=1
+                attempts += 1
                 continue
 
-            # Creamos la instancia sin set_session() que causaba error
             iq = IQ_Option(EMAIL, PASSWORD)
-            
-            # Conexión estándar, compatible con versiones actuales
             status, reason = iq.connect()
             
             if status:
-                # ⚠️ CAMBIA A "REAL" SI YA USAS DINERO REAL
-                balance_status = iq.change_balance("PRACTICE")
+                balance_status = iq.change_balance("PRACTICE")  # Cambiar a "REAL" si corresponde
                 if not balance_status:
                     send("⚠️ No se pudo cambiar a cuenta PRACTICE, usando actual")
                 
@@ -109,7 +106,7 @@ def connect():
         except Exception as e:
             send(f"❌ Error de conexión: {str(e)} | Intento {attempts+1}/{MAX_RECONNECT_ATTEMPTS}")
         
-        attempts +=1
+        attempts += 1
         time.sleep(RECONNECT_DELAY)
     
     send("💥 No se pudo conectar después de varios intentos. Reintentando en 30 segundos...")
@@ -117,33 +114,30 @@ def connect():
     return connect()
 
 # ====================================================
-#   📥 OBTENER DATOS DE VELAS DEL MERCADO (MEJORADA)
+#   📥 OBTENER DATOS DE VELAS (MEJORADO)
 # ====================================================
 def get_df(iq, pair, tf):
     try:
-        # Verificamos que la conexión siga activa
         if not iq.check_connect():
             send("⚠️ Conexión perdida, reconectando...")
             iq = connect()
             if not iq:
                 return None
 
-        # Pedimos más velas para garantizar datos suficientes
-        data = iq.get_candles(pair, tf, 30, time.time())
+        # Pedimos más velas para asegurar datos completos
+        data = iq.get_candles(pair, tf, 50, time.time())
         
-        if not data or len(data) < 10:
+        if not data or len(data) < 15:
             logging.warning(f"Datos insuficientes para {pair}")
             return None
         
         df = pd.DataFrame(data)
         
-        # Validación de columnas obligatorias
         required_cols = ["open", "close", "max", "min", "volume"]
         if not all(col in df.columns for col in required_cols):
             logging.error(f"Estructura de datos inválida para {pair}")
             return None
         
-        # Renombrar columnas para coincidir con la lógica
         df.rename(columns={"max": "high", "min": "low"}, inplace=True)
         df = df.astype({"open": float, "close": float, "high": float, "low": float, "volume": float})
         
@@ -154,19 +148,17 @@ def get_df(iq, pair, tf):
         return None
 
 # ====================================================
-#   🧠 BUCLE PRINCIPAL DE EJECUCIÓN
+#   🧠 BUCLE PRINCIPAL - PUNTO DE ENTRADA OPTIMIZADO
 # ====================================================
 def main():
-    global LOSS_STREAK, LAST_LOSS, DAILY_TRADES
+    global LOSS_STREAK, LAST_LOSS, DAILY_TRADES, LAST_TRADE_MINUTE
     iq = connect()
-    last_candle = None
-    signal = None
+    pending_signal = None  # Guardamos la señal para ejecutarla en el momento exacto
 
     while True:
         try:
             reset_day()
 
-            # Verificación continua de conexión
             if not iq.check_connect():
                 send("🔌 Conexión perdida, reconectando...")
                 iq = connect()
@@ -192,25 +184,25 @@ def main():
                     send("✅ Pausa finalizada. Reanudando operaciones.")
 
             # ======================================
-            # ⏱️ CONTROL DE TIEMPO PRECISO
+            # ⏱️ TIEMPO DEL SERVIDOR
             # ======================================
             server_time = iq.get_server_timestamp()
             sec = server_time % 60
+            current_minute = int(server_time // 60)
 
             # ======================================
-            # 🔍 FASE 1: ANÁLISIS (Segundo 45 a 58)
+            # 🔍 FASE DE ANÁLISIS (Segundos 30 a 57)
+            # Análisis anticipado para evitar prisas
             # ======================================
-            if 45 <= sec <= 58:
+            if 30 <= sec <= 57:
                 best_pair = None
                 best_signal = None
 
-                # Escaneamos todos los activos
                 for pair in PAIRS:
                     df = get_df(iq, pair, TIMEFRAME_M1)
-                    if df is None or len(df) < 10:
+                    if df is None or len(df) < 15:
                         continue
 
-                    # ✅ LLAMADA A LA ESTRATEGIA
                     try:
                         s = get_signal(df)
                     except Exception as e:
@@ -220,31 +212,31 @@ def main():
                     if s in ["call", "put"]:
                         best_pair = pair
                         best_signal = s
-                        break # Nos quedamos con la primera señal válida
+                        break  # Tomamos la primera señal válida
 
                 if best_pair:
-                    signal = (best_pair, best_signal)
-                    send(f"🔍 Señal detectada: {best_pair} | {best_signal.upper()}")
+                    pending_signal = (best_pair, best_signal)
+                    send(f"🔍 Señal preparada: {best_pair} | {best_signal.upper()} | Se ejecutará en cambio de vela")
                 else:
-                    signal = None
+                    pending_signal = None
 
             # ======================================
-            # ⚡ FASE 2: EJECUCIÓN (CIERRE DE VELA)
+            # ⚡ EJECUCIÓN PRECISA (Segundos 59.8 a 0.2)
+            # Punto de entrada exacto al inicio de la nueva vela
             # ======================================
-            if 59.2 <= sec <= 59.98 or 0 <= sec <= 0.3:
-                candle = int(server_time // 60)
-
-                # Evitar repetir operación en la misma vela
-                if candle == last_candle:
+            if 59.8 <= sec <= 59.99 or 0 <= sec <= 0.2:
+                # Evitar repetir operación en el mismo minuto
+                if current_minute == LAST_TRADE_MINUTE:
                     continue
-                last_candle = candle
+                LAST_TRADE_MINUTE = current_minute
 
-                if not signal:
+                if not pending_signal:
                     continue
 
-                pair, direction = signal
+                pair, direction = pending_signal
+                pending_signal = None  # Limpiamos la señal usada
 
-                # ✅ EJECUTAR ORDEN EN IQ OPTION
+                # ✅ EJECUTAR ORDEN
                 status, trade_id = iq.buy(BASE_AMOUNT, pair, direction, EXPIRATION)
 
                 if status:
@@ -253,11 +245,11 @@ def main():
                     send(f"""🚀 <b>OPERACIÓN EJECUTADA</b>
 💹 Activo: {pair}
 📈 Patrón: Racha larga + Cambio de dirección
-📌 Tipo: {tipo_op}
+📍 Punto de entrada: Inicio de vela
 💲 Monto: ${BASE_AMOUNT:.2f}
 🔄 #Op: {DAILY_TRADES}/{MAX_DAILY_TRADES}""")
 
-                    # ⏳ ESPERAR RESULTADO (65 Segundos)
+                    # ⏳ ESPERAR RESULTADO
                     time.sleep(65)
                     try:
                         resultado = iq.check_win_v4(trade_id)
@@ -278,7 +270,7 @@ def main():
                 else:
                     send(f"❌ No se pudo ejecutar operación en {pair}")
 
-            time.sleep(0.05)
+            time.sleep(0.03)  # Ciclo más rápido para mayor precisión
 
         except Exception as e:
             send(f"💥 <b>ERROR CRÍTICO:</b> {str(e)} | Reconectando...")
