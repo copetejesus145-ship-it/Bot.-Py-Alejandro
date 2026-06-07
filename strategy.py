@@ -1,108 +1,190 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-def get_signal(df):
-    """
-    ESTRATEGIA DE CICLOS: Detecta agotamiento + cambio de tendencia
-    ✅ Entra como en la operación ganadora de tu imagen
-    ✅ Bloquea entradas en retrocesos sin cambio real
-    ✅ Mide fuerza, agotamiento y confirmación
-    """
-    if df is None or len(df) < 40:
-        return None, 0
+# ==================================================
+# 🚀 ESTRATEGIA CORREGIDA - ERROR ELIMINADO
+# ✅ Extracción explícita de valores individuales
+# ✅ Sin ambigüedad en Pandas
+# ✅ Compatible con Railway / cualquier entorno
+# ==================================================
 
-    data = df.copy()
+def get_trend_signal(df):
+    if len(df) < 40:
+        return None
 
-    # ======================================
-    # INDICADORES
-    # ======================================
-    data['ma_corta'] = data['close'].rolling(4).mean()
-    data['ma_media'] = data['close'].rolling(10).mean()
-    data['ma_larga'] = data['close'].rolling(20).mean()
-    
-    data['rango'] = data['high'] - data['low']
-    rango_prom = data['rango'].rolling(20).mean()
-    data['cuerpo'] = abs(data['close'] - data['open'])
-    data['fuerza'] = np.where(data['cuerpo'] > rango_prom * 0.35, 1, 0)
-    
-    data['direccion'] = np.where(data['close'] > data['open'], 1, -1)
-    data['fuerza_acumulada'] = data['direccion'] * data['cuerpo']
-    data['tendencia_fuerza'] = data['fuerza_acumulada'].rolling(8).sum()
+    df = df.copy()
 
-    # Últimas 10 velas para ver ciclo completo
-    ultimas = data.tail(10).copy()
-    if len(ultimas) < 10:
-        return None, 0
+    # --------------------------
+    # CÁLCULO DE INDICADORES
+    # --------------------------
+    df['ema8'] = df['close'].ewm(span=8, adjust=False).mean()
+    df['ema13'] = df['close'].ewm(span=13, adjust=False).mean()
+    df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
+    df['ema34'] = df['close'].ewm(span=34, adjust=False).mean()
+    df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
 
-    v10, v9, v8, v7, v6, v5, v4, v3, v2, v1 = ultimas.iloc[:10].values
-    actual = ultimas.iloc[-1]
+    delta = df['close'].diff()
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
+    avg_gain = gain.rolling(window=14).mean()
+    avg_loss = loss.rolling(window=14).mean().replace(0, 0.001)
+    rs = avg_gain / avg_loss
+    df['rsi'] = 100.0 - (100.0 / (1.0 + rs))
 
-    # ======================================
-    # DETECTAR AGOTAMIENTO DE TENDENCIA
-    # ======================================
-    # Agotamiento bajista (como en tu operación ganadora)
-    agotamiento_bajista = (
-        actual['tendencia_fuerza'] < -rango_prom * 3  # Bajada muy fuerte acumulada
-        and abs(actual['cuerpo']) < rango_prom * 0.25  # Última vela sin fuerza
-        and v2['low'] <= v3['low'] <= v4['low']  # Mínimos sucesivos
+    df['macd'] = df['ema13'] - df['ema34']
+    df['signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+    df['hist'] = df['macd'] - df['signal']
+
+    df['tr'] = np.maximum(
+        df['high'] - df['low'],
+        np.maximum(
+            abs(df['high'] - df['close'].shift(1)),
+            abs(df['low'] - df['close'].shift(1))
+        )
+    )
+    df['dm_plus'] = np.where(
+        (df['high'] - df['high'].shift(1)) > (df['low'].shift(1) - df['low']),
+        np.maximum(df['high'] - df['high'].shift(1), 0.0),
+        0.0
+    )
+    df['dm_minus'] = np.where(
+        (df['low'].shift(1) - df['low']) > (df['high'] - df['high'].shift(1)),
+        np.maximum(df['low'].shift(1) - df['low'], 0.0),
+        0.0
     )
 
-    # Agotamiento alcista
-    agotamiento_alcista = (
-        actual['tendencia_fuerza'] > rango_prom * 3
-        and abs(actual['cuerpo']) < rango_prom * 0.25
-        and v2['high'] >= v3['high'] >= v4['high']
+    tr14 = df['tr'].rolling(14).sum().replace(0, 0.001)
+    dmp14 = df['dm_plus'].rolling(14).sum()
+    dmm14 = df['dm_minus'].rolling(14).sum()
+
+    di_plus = 100.0 * dmp14 / tr14
+    di_minus = 100.0 * dmm14 / tr14
+    di_sum = (di_plus + di_minus).replace(0, 0.001)
+    dx = 100.0 * abs(di_plus - di_minus) / di_sum
+    df['adx'] = dx.rolling(14).mean()
+
+    # --------------------------
+    # EXTRACCIÓN SEGURA DE VALORES
+    # --------------------------
+    try:
+        # Extraemos cada valor como número simple
+        adx1 = float(df['adx'].iloc[-1])
+        adx2 = float(df['adx'].iloc[-2])
+        adx3 = float(df['adx'].iloc[-3])
+
+        e8_1 = float(df['ema8'].iloc[-1])
+        e13_1 = float(df['ema13'].iloc[-1])
+        e21_1 = float(df['ema21'].iloc[-1])
+        e34_1 = float(df['ema34'].iloc[-1])
+        e50_1 = float(df['ema50'].iloc[-1])
+
+        e8_2 = float(df['ema8'].iloc[-2])
+        e13_2 = float(df['ema13'].iloc[-2])
+        e21_2 = float(df['ema21'].iloc[-2])
+
+        l1 = float(df['low'].iloc[-1])
+        l2 = float(df['low'].iloc[-2])
+        l3 = float(df['low'].iloc[-3])
+        l4 = float(df['low'].iloc[-4])
+
+        h1 = float(df['high'].iloc[-1])
+        h2 = float(df['high'].iloc[-2])
+        h3 = float(df['high'].iloc[-3])
+        h4 = float(df['high'].iloc[-4])
+
+        c1 = float(df['close'].iloc[-1])
+        c2 = float(df['close'].iloc[-2])
+        c3 = float(df['close'].iloc[-3])
+        c4 = float(df['close'].iloc[-4])
+
+        o1 = float(df['open'].iloc[-1])
+        o2 = float(df['open'].iloc[-2])
+        o3 = float(df['open'].iloc[-3])
+        o4 = float(df['open'].iloc[-4])
+
+        macd1 = float(df['macd'].iloc[-1])
+        sig1 = float(df['signal'].iloc[-1])
+        hist1 = float(df['hist'].iloc[-1])
+        hist2 = float(df['hist'].iloc[-2])
+        hist3 = float(df['hist'].iloc[-3])
+
+        rsi1 = float(df['rsi'].iloc[-1])
+        vol1 = float(df['volume'].iloc[-1])
+        vol_prom = float(df['volume'].iloc[-18:-1].mean())
+        rango_prom = float((df['high'].iloc[-18:-1] - df['low'].iloc[-18:-1]).mean())
+
+    except Exception:
+        return None
+
+    # --------------------------
+    # CONDICIONES DE ENTRADA
+    # --------------------------
+    if adx1 < 27.0:
+        return None
+
+    fuerza = 0
+    senal = None
+    tipo = ""
+
+    # Compra
+    cond_compra = (
+        e8_1 > e13_1 > e21_1 > e34_1 > e50_1 and
+        e8_2 > e13_2 > e21_2 and
+        l1 > l2 and l2 > l3 and l3 > l4 and
+        h1 > h2 and h2 > h3 and
+        c1 > e8_1 and c1 < e21_1 * 1.012 and
+        macd1 > sig1 and hist1 > hist2 and hist2 > hist3 and
+        51.0 < rsi1 < 63.0 and
+        adx1 > adx2 and adx2 > adx3 and
+        c1 > o1 and c2 > o2 and c3 > o3 and c4 > o4
     )
 
-    # ======================================
-    # NIVELES CLAVE
-    # ======================================
-    resistencia = max(v10[1], v9[1], v8[1], v7[1], v6[1], v5[1], v4[1], v3[1])
-    soporte = min(v10[2], v9[2], v8[2], v7[2], v6[2], v5[2], v4[2], v3[2])
+    if cond_compra:
+        distancia = (c1 - e21_1) / e21_1 * 100.0
+        if distancia <= 1.2:
+            senal = "call"
+            tipo = "alcista"
+            fuerza = 70
 
-    # ======================================
-    # CONDICIONES DE COMPRA (CALL) - COMO EN TU GANADORA
-    # ======================================
-    if agotamiento_bajista:
-        # Buscamos: cambio de dirección + fuerza + retroceso pequeño
-        velas_alcistas = sum(1 for v in [v3, v2, actual] if v['direccion'] == 1)
-        if (
-            velas_alcistas >= 2
-            and actual['fuerza'] == 1
-            and actual['close'] > v2['high']  # Supera el retroceso
-            and actual['ma_corta'] > actual['ma_media']
-        ):
-            return "call", 85
+    # Venta
+    cond_venta = (
+        e8_1 < e13_1 < e21_1 < e34_1 < e50_1 and
+        e8_2 < e13_2 < e21_2 and
+        h1 < h2 and h2 < h3 and h3 < h4 and
+        l1 < l2 and l2 < l3 and
+        c1 < e8_1 and c1 > e21_1 * 0.988 and
+        macd1 < sig1 and hist1 < hist2 and hist2 < hist3 and
+        37.0 < rsi1 < 49.0 and
+        adx1 > adx2 and adx2 > adx3 and
+        c1 < o1 and c2 < o2 and c3 < o3 and c4 < o4
+    )
 
-    # Compra por ruptura normal
-    if (
-        not agotamiento_alcista
-        and actual['close'] > resistencia
-        and actual['fuerza'] == 1
-        and actual['ma_corta'] > actual['ma_larga']
-    ):
-        return "call", 78
+    if cond_venta:
+        distancia = (e21_1 - c1) / e21_1 * 100.0
+        if distancia <= 1.2:
+            senal = "put"
+            tipo = "bajista"
+            fuerza = 70
 
-    # ======================================
-    # CONDICIONES DE VENTA (PUT)
-    # ======================================
-    if agotamiento_alcista:
-        velas_bajistas = sum(1 for v in [v3, v2, actual] if v['direccion'] == -1)
-        if (
-            velas_bajistas >= 2
-            and actual['fuerza'] == 1
-            and actual['close'] < v2['low']
-            and actual['ma_corta'] < actual['ma_media']
-        ):
-            return "put", 85
+    if senal is None:
+        return None
 
-    # Venta por ruptura normal
-    if (
-        not agotamiento_bajista
-        and actual['close'] < soporte
-        and actual['fuerza'] == 1
-        and actual['ma_corta'] < actual['ma_larga']
-    ):
-        return "put", 78
+    # Filtros de calidad
+    vela_tam = h1 - l1
+    if vela_tam < rango_prom * 0.68:
+        return None
+    fuerza += 10
 
-    return None, 0
+    if vol1 < vol_prom * 0.8:
+        return None
+    fuerza += 10
+
+    cuerpo = abs(c1 - o1)
+    if cuerpo < vela_tam * 0.52:
+        return None
+    fuerza += 10
+
+    return (senal, min(fuerza, 100), tipo)
+
+def pro_signal(df):
+    return None
