@@ -6,7 +6,7 @@ import sys
 import logging
 from datetime import datetime, timezone
 
-# Importar estrategia de tendencia
+# Importar estrategia corregida
 from strategy import get_trend_signal
 
 from iqoptionapi.stable_api import IQ_Option
