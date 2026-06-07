@@ -2,66 +2,108 @@ import numpy as np
 import pandas as pd
 
 # ==================================================
-# 🚀 ESTRATEGIA EXACTA BASADA EN TUS GRÁFICOS
-# ✅ LÓGICA DETECTADA:
-#    1. RACHAS LARGAS: 3 o más velas seguidas del mismo color
-#    2. CAMBIO DE ESTRUCTURA: Aparece la primera vela de color contrario
-#    3. ENTRADA: Operar en dirección a la nueva vela (REVERSIÓN)
-# ✅ REGLA DE ORO:
-#    → 3 VERDES (o más) + 1 ROJA = VENDER (PUT)
-#    → 3 ROJAS (o más) + 1 VERDE = COMPRAR (CALL)
-# ✅ SOLO ESTE PATRÓN, SIN INDICADORES EXTERNOS
+# 🚀 ESTRATEGIA: SOLO A FAVOR DE LA TENDENCIA
+# ✅ LÓGICA NUEVA:
+# 1. Definir tendencia principal en marco de 5 minutos
+# 2. Buscar entradas solo en la misma dirección
+# 3. Confirmar continuidad y fuerza en 1 minuto
+# 4. NUNCA operar en contra de la tendencia
 # ==================================================
 
-def get_signal(df):
+def get_trend_signal(df_tendencia, df_entrada):
     """
-    FUNCIÓN PRINCIPAL DE ANÁLISIS
-    Recibe el DataFrame con todas las velas descargadas
-    Devuelve: 'call' / 'put' / None (si no cumple la regla)
+    Devuelve (señal, fuerza, direccion) o None
+    Solo genera señal si coincide con la tendencia principal
     """
 
-    # 🛑 REQUISITO MÍNIMO: Necesitamos al menos 4 velas para analizar
-    # (3 de la racha + 1 del cambio)
-    if len(df) < 4:
+    if len(df_tendencia) < 15 or len(df_entrada) < 10:
         return None
 
-    # 📥 SELECCIONAMOS LAS ÚLTIMAS 5 VELAS
-    # Tomamos 5 para cubrir casos donde la racha sea de 4 o 5 velas
-    ultimas_velas = df.tail(5).copy()
+    # ======================================
+    # 🔍 PASO 1: DEFINIR TENDENCIA PRINCIPAL
+    # ======================================
+    ultimas_tendencia = df_tendencia.tail(12).copy()
+    maximos = ultimas_tendencia['high'].values
+    minimos = ultimas_tendencia['low'].values
+    cierres = ultimas_tendencia['close'].values
 
-    # 🟩 CLASIFICACIÓN DE VELAS:
-    # Convertimos cada vela en un número para leer la secuencia fácil:
-    #  1 = VERDE  → Alcista (Cierre > Apertura)
-    # -1 = ROJA   → Bajista (Cierre < Apertura)
-    ultimas_velas['tipo'] = np.where(ultimas_velas['close'] > ultimas_velas['open'], 1, -1)
+    tendencia = "lateral"
+    fuerza_base = 0
 
-    # Convertimos la columna a lista para analizar el orden
-    secuencia = ultimas_velas['tipo'].tolist()
+    # Tendencia alcista: máximos y mínimos crecientes
+    if (maximos[-1] > maximos[-3] > maximos[-6] and
+        minimos[-1] > minimos[-3] > minimos[-6] and
+        cierres[-1] > cierres[-6]):
+        tendencia = "alcista"
+        fuerza_base += 35
 
-    # ============================================
-    # 🔴 CASO 1: RACHA DE SUBIDA → CAMBIO A BAJADA
-    # ============================================
-    # Condición: Las 3 primeras velas son VERDES, la ÚLTIMA es ROJA
-    # Ejemplos válidos: [1,1,1,-1], [1,1,1,1,-1], [1,1,1,-1,1]
-    if secuencia[0] == 1 and secuencia[1] == 1 and secuencia[2] == 1 and secuencia[-1] == -1:
-        return "put"  # 📉 SEÑAL DE VENTA: La tendencia se invierte a la baja
+    # Tendencia bajista: máximos y mínimos decrecientes
+    elif (maximos[-1] < maximos[-3] < maximos[-6] and
+          minimos[-1] < minimos[-3] < minimos[-6] and
+          cierres[-1] < cierres[-6]):
+        tendencia = "bajista"
+        fuerza_base += 35
 
-    # ============================================
-    # 🟢 CASO 2: RACHA DE BAJADA → CAMBIO A SUBIDA
-    # ============================================
-    # Condición: Las 3 primeras velas son ROJAS, la ÚLTIMA es VERDE
-    # Ejemplos válidos: [-1,-1,-1,1], [-1,-1,-1,-1,1], [-1,-1,-1,1,-1]
-    if secuencia[0] == -1 and secuencia[1] == -1 and secuencia[2] == -1 and secuencia[-1] == 1:
-        return "call" # 📈 SEÑAL DE COMPRA: La tendencia se invierte al alza
+    # Si no hay tendencia clara: no operar
+    if tendencia == "lateral":
+        return None
 
-    # ❌ SI NO CUMPLE NINGUNA DE LAS REGLAS: NO OPERAR
+    # ======================================
+    # 📊 PASO 2: BUSCAR ENTRADA A FAVOR
+    # ======================================
+    ultimas_entrada = df_entrada.tail(6).copy()
+    ultimas_entrada['tipo'] = np.where(ultimas_entrada['close'] > ultimas_entrada['open'], 1, -1)
+    secuencia = ultimas_entrada['tipo'].tolist()
+
+    # ======================================
+    # 🛡️ FILTROS DE CONFIRMACIÓN
+    # ======================================
+    df_analisis = df_entrada.tail(10).copy()
+    df_analisis['rango'] = df_analisis['high'] - df_analisis['low']
+    rango_prom = df_analisis['rango'].mean()
+    volumen_prom = df_analisis['volume'].mean()
+
+    v1 = ultimas_entrada.iloc[-1]
+    v2 = ultimas_entrada.iloc[-2]
+    v3 = ultimas_entrada.iloc[-3]
+
+    # Tamaño de vela suficiente
+    tamaño_prom = ((v1.high - v1.low) + (v2.high - v2.low) + (v3.high - v3.low)) / 3
+    if tamaño_prom < rango_prom * 0.5:
+        return None
+    fuerza_base += 15
+
+    # Volumen de confirmación
+    vol_prom = (v1.volume + v2.volume + v3.volume) / 3
+    if vol_prom < volumen_prom * 0.6:
+        return None
+    fuerza_base += 10
+
+    # Cuerpo claro
+    cuerpo_prom = (abs(v1.close - v1.open) + abs(v2.close - v2.open) + abs(v3.close - v3.open)) / 3
+    if cuerpo_prom < tamaño_prom * 0.4:
+        return None
+    fuerza_base += 10
+
+    # ======================================
+    # ✅ DEFINIR SEÑAL FINAL
+    # ======================================
+    if tendencia == "alcista":
+        # Buscar continuidad alcista
+        if secuencia[-3] == 1 and secuencia[-2] == 1 and secuencia[-1] == 1:
+            fuerza_base += 20
+            return ("call", min(fuerza_base, 100), "alcista")
+
+    elif tendencia == "bajista":
+        # Buscar continuidad bajista
+        if secuencia[-3] == -1 and secuencia[-2] == -1 and secuencia[-1] == -1:
+            fuerza_base += 20
+            return ("put", min(fuerza_base, 100), "bajista")
+
     return None
 
-
-# ============================================
-# 🔄 FUNCIÓN DE COMPATIBILIDAD
-# Mantiene el nombre que usa tu bot principal
-# ============================================
+# ====================================================
+# 🔄 Alias de compatibilidad
+# ====================================================
 def pro_signal(df):
-    """Alias de seguridad para asegurar compatibilidad total"""
-    return get_signal(df)
+    return None
