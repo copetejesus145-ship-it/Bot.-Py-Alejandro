@@ -48,8 +48,9 @@ DAILY_TRADES = 0
 CURRENT_DAY = datetime.now(UTC).day
 LOSS_STREAK = 0
 LAST_LOSS = 0
-LAST_CANDLE_TIME = 0           # Control por tiempo exacto de vela
-SIGNAL_READY = None            # Guarda señal validada
+LAST_CANDLE_ID = -1            # Identificador único de vela procesada
+SIGNAL_PENDING = None          # Guarda señal hasta ejecución
+LAST_SENT_SIGNAL = None        # Evita mensajes repetidos
 
 # ====================================================
 #   📱 ENVÍO DE MENSAJES A TELEGRAM
@@ -124,18 +125,15 @@ def get_df(iq, pair, tf):
             if not iq:
                 return None
 
-        # Obtenemos suficientes velas para analizar estructura completa
         data = iq.get_candles(pair, tf, 80, time.time())
         
         if not data or len(data) < 20:
-            logging.warning(f"Datos insuficientes para analizar estructura de {pair}")
             return None
         
         df = pd.DataFrame(data)
         
         required_cols = ["open", "close", "max", "min", "volume"]
         if not all(col in df.columns for col in required_cols):
-            logging.error(f"Estructura de datos inválida para {pair}")
             return None
         
         df.rename(columns={"max": "high", "min": "low"}, inplace=True)
@@ -148,10 +146,10 @@ def get_df(iq, pair, tf):
         return None
 
 # ====================================================
-#   🧠 BUCLE PRINCIPAL - CIERRE DE VELA EXACTO
+#   🧠 BUCLE PRINCIPAL - SIN MENSAJES REPETIDOS + EJECUCIÓN FIABLE
 # ====================================================
 def main():
-    global LOSS_STREAK, LAST_LOSS, DAILY_TRADES, LAST_CANDLE_TIME, SIGNAL_READY
+    global LOSS_STREAK, LAST_LOSS, DAILY_TRADES, LAST_CANDLE_ID, SIGNAL_PENDING, LAST_SENT_SIGNAL
     iq = connect()
 
     while True:
@@ -168,8 +166,7 @@ def main():
             # 🛑 CONTROLES DE SEGURIDAD
             # ======================================
             if DAILY_TRADES >= MAX_DAILY_TRADES:
-                send(f"ℹ️ Límite diario alcanzado ({MAX_DAILY_TRADES} operaciones). Esperando nuevo día.")
-                time.sleep(60)
+                time.sleep(30)
                 continue
 
             if LOSS_STREAK >= MAX_LOSS_STREAK:
@@ -181,17 +178,16 @@ def main():
                     LOSS_STREAK = 0
 
             # ======================================
-            # ⏱️ TIEMPO DEL SERVIDOR SIN DESFASE
+            # ⏱️ TIEMPO DEL SERVIDOR
             # ======================================
             server_time = iq.get_server_timestamp()
             sec = server_time % 60
-            current_candle = int(server_time // 60)  # Identificador único de vela
+            current_candle_id = int(server_time // 60)  # ID único por minuto
 
             # ======================================
-            # 🔍 ANÁLISIS DE ESTRUCTURA (Segundos 30 a 58)
-            # Se analiza antes del cierre con datos ya formados
+            # 🔍 ANÁLISIS (Segundos 30 a 57) - SOLO UNA VEZ POR MINUTO
             # ======================================
-            if 30 <= sec <= 58:
+            if 30 <= sec <= 57 and current_candle_id != LAST_CANDLE_ID:
                 best_pair = None
                 best_signal = None
 
@@ -201,10 +197,8 @@ def main():
                         continue
 
                     try:
-                        # Llamamos a la estrategia de estructura
                         s = get_signal(df)
                     except Exception as e:
-                        logging.error(f"Error en análisis para {pair}: {str(e)}")
                         continue
 
                     if s in ["call", "put"]:
@@ -212,29 +206,33 @@ def main():
                         best_signal = s
                         break
 
-                if best_pair:
-                    SIGNAL_READY = (best_pair, best_signal)
-                    send(f"🔍 Estructura detectada: {best_pair} | {best_signal.upper()}\n⏳ Esperando cierre de vela para ejecutar")
+                if best_pair and best_signal:
+                    SIGNAL_PENDING = (best_pair, best_signal)
+                    # Enviamos mensaje SOLO una vez por señal
+                    if (best_pair, best_signal) != LAST_SENT_SIGNAL:
+                        send(f"🔍 Estructura detectada: {best_pair} | {best_signal.upper()}\n⏳ Ejecutando al cierre de vela")
+                        LAST_SENT_SIGNAL = (best_pair, best_signal)
                 else:
-                    SIGNAL_READY = None
+                    SIGNAL_PENDING = None
+                    LAST_SENT_SIGNAL = None
 
             # ======================================
-            # ⚡ EJECUCIÓN JUSTO AL CIERRE DE VELA
-            # Rango exacto: 59.8 a 00.2 segundos
+            # ⚡ EJECUCIÓN EXACTA - RANGO AMPLIO PARA EVITAR DESFASES
             # ======================================
-            if 59.8 <= sec <= 59.99 or 0 <= sec <= 0.2:
-                # Evitamos repetir operación en la misma vela
-                if current_candle == LAST_CANDLE_TIME:
+            if 59.5 <= sec <= 59.99 or 0 <= sec <= 0.5:
+                if current_candle_id == LAST_CANDLE_ID:
+                    continue  # Ya procesamos esta vela
+
+                LAST_CANDLE_ID = current_candle_id
+
+                if not SIGNAL_PENDING:
                     continue
-                LAST_CANDLE_TIME = current_candle
 
-                if not SIGNAL_READY:
-                    continue
+                pair, direction = SIGNAL_PENDING
+                SIGNAL_PENDING = None
+                LAST_SENT_SIGNAL = None
 
-                pair, direction = SIGNAL_READY
-                SIGNAL_READY = None  # Limpiamos señal usada
-
-                # ✅ EJECUCIÓN EN EL INSTANTE EXACTO
+                # ✅ EJECUTAR ORDEN
                 status, trade_id = iq.buy(BASE_AMOUNT, pair, direction, EXPIRATION)
 
                 if status:
@@ -243,7 +241,7 @@ def main():
                     send(f"""🚀 <b>OPERACIÓN EJECUTADA</b>
 💹 Activo: {pair}
 📍 Entrada: Cierre exacto de vela
-📊 Análisis: Estructura del mercado
+📊 Análisis: Estructura de mercado
 📌 Tipo: {tipo_op}
 💲 Monto: ${BASE_AMOUNT:.2f}
 🔄 #Op: {DAILY_TRADES}/{MAX_DAILY_TRADES}""")
@@ -269,11 +267,10 @@ def main():
                 else:
                     send(f"❌ No se pudo ejecutar orden en {pair}")
 
-            time.sleep(0.02)  # Ciclo muy rápido para máxima precisión
+            time.sleep(0.05)  # Reducimos frecuencia para evitar saturación
 
         except Exception as e:
             send(f"💥 <b>ERROR CRÍTICO:</b> {str(e)} | Reconectando...")
-            logging.exception("Error en bucle principal")
             time.sleep(5)
             try:
                 iq = connect()
