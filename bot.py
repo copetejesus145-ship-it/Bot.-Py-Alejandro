@@ -46,7 +46,7 @@ MAX_RECONNECT_ATTEMPTS = 5    # Intentos de reconexión
 RECONNECT_DELAY = 5           # Segundos entre intentos
 FUERZA_MINIMA = 64            # Fuerza mínima requerida para operar
 
-# Variables de control
+# Variables de control globales
 DAILY_TRADES = 0
 CURRENT_DAY = datetime.now(timezone.utc).day
 LOSS_STREAK = 0
@@ -201,7 +201,7 @@ def get_df(iq, pair):
 # 🧠 BUCLE PRINCIPAL DE FUNCIONAMIENTO
 # ====================================================
 def main():
-    global LOSS_STREAK, LAST_LOSS, DAILY_TRADES, LAST_TRADE
+    global BOT_RUNNING, LOSS_STREAK, LAST_LOSS, DAILY_TRADES, LAST_TRADE
     
     # Iniciar escucha de comandos en segundo plano
     threading.Thread(target=listen_commands, daemon=True).start()
