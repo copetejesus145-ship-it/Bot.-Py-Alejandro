@@ -27,7 +27,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # ⚙️ PARÁMETROS DE OPERACIÓN
 EXPIRATION = 1                  # ⏱️ EXPIRACIÓN: 1 MINUTO
-BASE_AMOUNT = 10                # 💰 MONTO POR OPERACIÓN
+BASE_AMOUNT = 10                # 💰 MONTO POR OPERACIÓN (coincide con tu mensaje)
 TIMEFRAME_M1 = 60               # 🕯️ VELAS DE 1 MINUTO
 
 # 🎯 ACTIVOS OTC
@@ -48,9 +48,9 @@ DAILY_TRADES = 0
 CURRENT_DAY = datetime.now(UTC).day
 LOSS_STREAK = 0
 LAST_LOSS = 0
-LAST_CANDLE_ID = -1            # Identificador único de vela procesada
-SIGNAL_PENDING = None          # Guarda señal hasta ejecución
-LAST_SENT_SIGNAL = None        # Evita mensajes repetidos
+LAST_PROCESSED_CANDLE = -1     # Última vela ya analizada
+PENDING_SIGNAL = None          # Señal guardada para ejecutar en la vela siguiente
+LAST_NOTIFIED = None           # Evita mensajes repetidos
 
 # ====================================================
 #   📱 ENVÍO DE MENSAJES A TELEGRAM
@@ -70,11 +70,13 @@ def send(msg):
 #   🔄 REINICIO DE CONTADORES CADA DÍA
 # ====================================================
 def reset_day():
-    global DAILY_TRADES, CURRENT_DAY, LOSS_STREAK
+    global DAILY_TRADES, CURRENT_DAY, LOSS_STREAK, PENDING_SIGNAL, LAST_NOTIFIED
     today = datetime.now(UTC).day
     if today != CURRENT_DAY:
         DAILY_TRADES = 0
         LOSS_STREAK = 0
+        PENDING_SIGNAL = None
+        LAST_NOTIFIED = None
         CURRENT_DAY = today
         send("🔄 <b>NUEVO DÍA INICIADO</b> | Contadores reiniciados.")
 
@@ -95,11 +97,11 @@ def connect():
             status, reason = iq.connect()
             
             if status:
-                balance_status = iq.change_balance("PRACTICE")  # Cambiar a "REAL" si corresponde
+                balance_status = iq.change_balance("PRACTICE")
                 if not balance_status:
                     send("⚠️ No se pudo cambiar a cuenta PRACTICE, usando cuenta actual")
                 
-                send("✅ <b>BOT CONECTADO</b> | Análisis por estructura y cierre de vela")
+                send("✅ <b>BOT CONECTADO</b> | Análisis por estructura - Ejecución en vela siguiente")
                 return iq
             else:
                 send(f"❌ Error de conexión: {reason} | Intento {attempts+1}/{MAX_RECONNECT_ATTEMPTS}")
@@ -115,7 +117,7 @@ def connect():
     return connect()
 
 # ====================================================
-#   📥 OBTENER DATOS COMPLETOS DE MERCADO
+#   📥 OBTENER DATOS DE MERCADO
 # ====================================================
 def get_df(iq, pair, tf):
     try:
@@ -146,10 +148,10 @@ def get_df(iq, pair, tf):
         return None
 
 # ====================================================
-#   🧠 BUCLE PRINCIPAL - SIN MENSAJES REPETIDOS + EJECUCIÓN FIABLE
+#   🧠 LÓGICA PRINCIPAL: DETECTAR → GUARDAR → EJECUTAR EN SIGUIENTE VELA
 # ====================================================
 def main():
-    global LOSS_STREAK, LAST_LOSS, DAILY_TRADES, LAST_CANDLE_ID, SIGNAL_PENDING, LAST_SENT_SIGNAL
+    global LOSS_STREAK, LAST_LOSS, DAILY_TRADES, LAST_PROCESSED_CANDLE, PENDING_SIGNAL, LAST_NOTIFIED
     iq = connect()
 
     while True:
@@ -182,12 +184,13 @@ def main():
             # ======================================
             server_time = iq.get_server_timestamp()
             sec = server_time % 60
-            current_candle_id = int(server_time // 60)  # ID único por minuto
+            current_candle = int(server_time // 60)  # Vela actual
 
             # ======================================
-            # 🔍 ANÁLISIS (Segundos 30 a 57) - SOLO UNA VEZ POR MINUTO
+            # 🔍 FASE 1: ANALIZAR Y GUARDAR SEÑAL (Segundos 30 a 58)
             # ======================================
-            if 30 <= sec <= 57 and current_candle_id != LAST_CANDLE_ID:
+            if 30 <= sec <= 58 and current_candle != LAST_PROCESSED_CANDLE:
+                LAST_PROCESSED_CANDLE = current_candle
                 best_pair = None
                 best_signal = None
 
@@ -207,30 +210,26 @@ def main():
                         break
 
                 if best_pair and best_signal:
-                    SIGNAL_PENDING = (best_pair, best_signal)
-                    # Enviamos mensaje SOLO una vez por señal
-                    if (best_pair, best_signal) != LAST_SENT_SIGNAL:
-                        send(f"🔍 Estructura detectada: {best_pair} | {best_signal.upper()}\n⏳ Ejecutando al cierre de vela")
-                        LAST_SENT_SIGNAL = (best_pair, best_signal)
+                    PENDING_SIGNAL = (best_pair, best_signal)
+                    # Solo notificar una vez
+                    if (best_pair, best_signal) != LAST_NOTIFIED:
+                        send(f"🔍 Estructura detectada: {best_pair} | {best_signal.upper()}\n⏳ Se ejecutará en la vela siguiente")
+                        LAST_NOTIFIED = (best_pair, best_signal)
                 else:
-                    SIGNAL_PENDING = None
-                    LAST_SENT_SIGNAL = None
+                    PENDING_SIGNAL = None
+                    LAST_NOTIFIED = None
 
             # ======================================
-            # ⚡ EJECUCIÓN EXACTA - RANGO AMPLIO PARA EVITAR DESFASES
+            # ⚡ FASE 2: EJECUTAR LA SEÑAL GUARDADA EN LA VELA SIGUIENTE
             # ======================================
-            if 59.5 <= sec <= 59.99 or 0 <= sec <= 0.5:
-                if current_candle_id == LAST_CANDLE_ID:
-                    continue  # Ya procesamos esta vela
-
-                LAST_CANDLE_ID = current_candle_id
-
-                if not SIGNAL_PENDING:
+            if 59.7 <= sec <= 59.99 or 0 <= sec <= 0.3:
+                if not PENDING_SIGNAL:
                     continue
 
-                pair, direction = SIGNAL_PENDING
-                SIGNAL_PENDING = None
-                LAST_SENT_SIGNAL = None
+                # Extraemos la señal guardada y la limpiamos
+                pair, direction = PENDING_SIGNAL
+                PENDING_SIGNAL = None
+                LAST_NOTIFIED = None
 
                 # ✅ EJECUTAR ORDEN
                 status, trade_id = iq.buy(BASE_AMOUNT, pair, direction, EXPIRATION)
@@ -240,8 +239,8 @@ def main():
                     tipo_op = "🟢 <b>COMPRA (CALL)</b>" if direction == "call" else "🔴 <b>VENTA (PUT)</b>"
                     send(f"""🚀 <b>OPERACIÓN EJECUTADA</b>
 💹 Activo: {pair}
-📍 Entrada: Cierre exacto de vela
-📊 Análisis: Estructura de mercado
+📍 Entrada: Inicio de vela siguiente
+📊 Análisis: Estructura detectada previamente
 📌 Tipo: {tipo_op}
 💲 Monto: ${BASE_AMOUNT:.2f}
 🔄 #Op: {DAILY_TRADES}/{MAX_DAILY_TRADES}""")
@@ -267,7 +266,7 @@ def main():
                 else:
                     send(f"❌ No se pudo ejecutar orden en {pair}")
 
-            time.sleep(0.05)  # Reducimos frecuencia para evitar saturación
+            time.sleep(0.05)
 
         except Exception as e:
             send(f"💥 <b>ERROR CRÍTICO:</b> {str(e)} | Reconectando...")
