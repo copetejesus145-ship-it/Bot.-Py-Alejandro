@@ -8,7 +8,6 @@ import threading
 import logging
 from datetime import datetime, timezone
 
-# Importación correcta de la función
 from strategy import get_trend_signal
 from iqoptionapi.stable_api import IQ_Option
 
@@ -18,7 +17,7 @@ logging.basicConfig(
 )
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN PRINCIPAL
+# ⚙️ CONFIGURACIÓN AJUSTADA PARA MÁS OPERACIONES
 # ==========================================
 EMAIL = os.getenv("IQ_EMAIL")
 PASSWORD = os.getenv("IQ_PASSWORD")
@@ -29,17 +28,19 @@ EXPIRATION = 1
 BASE_AMOUNT = 25
 TIMEFRAME_M1 = 60
 
+# Lista ampliada de activos para tener más oportunidades
 PAIRS = [
-    "EURUSD-OTC", "GBPUSD-OTC", "USDCHF-OTC",
-    "EURGBP-OTC", "EURJPY-OTC", "GBPJPY-OTC"
+    "EURUSD-OTC", "GBPUSD-OTC", "USDCHF-OTC", "USDJPY-OTC",
+    "EURGBP-OTC", "EURJPY-OTC", "GBPJPY-OTC", "AUDUSD-OTC",
+    "USDCAD-OTC", "NZDUSD-OTC"
 ]
 
-MAX_DAILY_TRADES = 28
-MAX_LOSS_STREAK = 2
-PAUSE_TIME = 2400
+MAX_DAILY_TRADES = 40  # Aumentado de 28 a 40
+MAX_LOSS_STREAK = 3    # Aumentado de 2 a 3
+PAUSE_TIME = 1800      # Reducido de 2400 a 1800 (30min)
 MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_DELAY = 5
-FUERZA_MINIMA = 72
+FUERZA_MINIMA = 65     # Reducido de 72 a 65 para aceptar más señales
 
 # Variables globales
 DAILY_TRADES = 0
@@ -159,7 +160,7 @@ def get_df(iq, pair):
                 return None
 
         data = iq.get_candles(pair, TIMEFRAME_M1, 60, time.time())
-        if not data or len(data) < 40:
+        if not data or len(data) < 30:  # Reducido de 40 a 30 para mayor agilidad
             return None
 
         df = pd.DataFrame(data)
@@ -224,7 +225,7 @@ def main():
             mejor_opcion = None
             mayor_fuerza = 0
 
-            if 35 <= sec <= 55:
+            if 30 <= sec <= 58:  # Ventana de búsqueda ampliada
                 for pair in PAIRS:
                     df = get_df(iq, pair)
                     if df is None:
@@ -237,7 +238,7 @@ def main():
                             mayor_fuerza = fuerza
                             mejor_opcion = (pair, signal, fuerza, direccion)
 
-            if 57 <= sec <= 59.9 and mejor_opcion is not None:
+            if 56 <= sec <= 59.9 and mejor_opcion is not None:
                 pair, signal, fuerza, direccion = mejor_opcion
 
                 if (pair, signal) == LAST_TRADE:
