@@ -2,62 +2,66 @@ import numpy as np
 import pandas as pd
 
 # ==================================================
-# 🚀 ESTRATEGIA EXACTA - PATRÓN DE LA IMAGEN
-# ✅ PATRÓN: 3 VERDES + 1 ROJA = VENTA
-# ✅ PATRÓN: 3 ROJAS + 1 VERDE = COMPRA
-# ✅ SOLO ESTA LÓGICA, SIN OTROS INDICADORES
-# ✅ ACTIVO: EURUSD OTC | 1 MINUTO
+# 🚀 ESTRATEGIA EXACTA BASADA EN TUS GRÁFICOS
+# ✅ LÓGICA DETECTADA:
+#    1. RACHAS LARGAS: 3 o más velas seguidas del mismo color
+#    2. CAMBIO DE ESTRUCTURA: Aparece la primera vela de color contrario
+#    3. ENTRADA: Operar en dirección a la nueva vela (REVERSIÓN)
+# ✅ REGLA DE ORO:
+#    → 3 VERDES (o más) + 1 ROJA = VENDER (PUT)
+#    → 3 ROJAS (o más) + 1 VERDE = COMPRAR (CALL)
+# ✅ SOLO ESTE PATRÓN, SIN INDICADORES EXTERNOS
 # ==================================================
-
-# ============================================
-# 📊 DETECCIÓN DE PATRÓN DE VELAS
-# ============================================
 
 def get_signal(df):
     """
-    FUNCIÓN PRINCIPAL:
-    Analiza las últimas 4 velas cerradas.
-    Si cumple el patrón → Devuelve señal.
-    Si no cumple → No opera.
+    FUNCIÓN PRINCIPAL DE ANÁLISIS
+    Recibe el DataFrame con todas las velas descargadas
+    Devuelve: 'call' / 'put' / None (si no cumple la regla)
     """
-    # Necesitamos al menos 4 velas para analizar el patrón
+
+    # 🛑 REQUISITO MÍNIMO: Necesitamos al menos 4 velas para analizar
+    # (3 de la racha + 1 del cambio)
     if len(df) < 4:
         return None
 
-    # 📥 TOMAMOS LAS ÚLTIMAS 4 VELAS CERRADAS
-    # (El patrón es de 4 velas: 3 iguales + 1 contraria)
-    ultimas_4 = df.tail(4).copy()
+    # 📥 SELECCIONAMOS LAS ÚLTIMAS 5 VELAS
+    # Tomamos 5 para cubrir casos donde la racha sea de 4 o 5 velas
+    ultimas_velas = df.tail(5).copy()
 
-    # 🟩 CLASIFICAR VELAS:
-    #  1 = VERDE (Alcista: Cierre > Apertura)
-    # -1 = ROJA (Bajista: Cierre < Apertura)
-    ultimas_4['tipo'] = np.where(ultimas_4['close'] > ultimas_4['open'], 1, -1)
+    # 🟩 CLASIFICACIÓN DE VELAS:
+    # Convertimos cada vela en un número para leer la secuencia fácil:
+    #  1 = VERDE  → Alcista (Cierre > Apertura)
+    # -1 = ROJA   → Bajista (Cierre < Apertura)
+    ultimas_velas['tipo'] = np.where(ultimas_velas['close'] > ultimas_velas['open'], 1, -1)
 
-    # Convertimos la secuencia a lista para leerla fácil
-    secuencia = ultimas_4['tipo'].tolist()
-
-    # ============================================
-    # 🟢 PATRÓN 1: 3 VERDES + 1 ROJA → VENDER (PUT)
-    # Secuencia: [1, 1, 1, -1]
-    # ============================================
-    if secuencia == [1, 1, 1, -1]:
-        return "put"
+    # Convertimos la columna a lista para analizar el orden
+    secuencia = ultimas_velas['tipo'].tolist()
 
     # ============================================
-    # 🔴 PATRÓN 2: 3 ROJAS + 1 VERDE → COMPRAR (CALL)
-    # Secuencia: [-1, -1, -1, 1]
+    # 🔴 CASO 1: RACHA DE SUBIDA → CAMBIO A BAJADA
     # ============================================
-    if secuencia == [-1, -1, -1, 1]:
-        return "call"
+    # Condición: Las 3 primeras velas son VERDES, la ÚLTIMA es ROJA
+    # Ejemplos válidos: [1,1,1,-1], [1,1,1,1,-1], [1,1,1,-1,1]
+    if secuencia[0] == 1 and secuencia[1] == 1 and secuencia[2] == 1 and secuencia[-1] == -1:
+        return "put"  # 📉 SEÑAL DE VENTA: La tendencia se invierte a la baja
 
-    # ❌ SI NO CUMPLE NINGÚN PATRÓN: NO OPERAR
+    # ============================================
+    # 🟢 CASO 2: RACHA DE BAJADA → CAMBIO A SUBIDA
+    # ============================================
+    # Condición: Las 3 primeras velas son ROJAS, la ÚLTIMA es VERDE
+    # Ejemplos válidos: [-1,-1,-1,1], [-1,-1,-1,-1,1], [-1,-1,-1,1,-1]
+    if secuencia[0] == -1 and secuencia[1] == -1 and secuencia[2] == -1 and secuencia[-1] == 1:
+        return "call" # 📈 SEÑAL DE COMPRA: La tendencia se invierte al alza
+
+    # ❌ SI NO CUMPLE NINGUNA DE LAS REGLAS: NO OPERAR
     return None
 
 
 # ============================================
-# 🔄 COMPATIBILIDAD CON TU BOT
+# 🔄 FUNCIÓN DE COMPATIBILIDAD
+# Mantiene el nombre que usa tu bot principal
 # ============================================
-
 def pro_signal(df):
-    """Alias para mantener compatibilidad con tu código principal"""
+    """Alias de seguridad para asegurar compatibilidad total"""
     return get_signal(df)
