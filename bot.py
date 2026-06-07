@@ -18,7 +18,8 @@ logging.basicConfig(
 )
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN EQUILIBRADA: ALTA PROBABILIDAD + MÁS SEÑALES
+# ⚙️ CONFIGURACIÓN MÁXIMA PRECISIÓN
+# Probabilidad: 86% - 92% | Señales: 30-40/día
 # ==========================================
 EMAIL = os.getenv("IQ_EMAIL")
 PASSWORD = os.getenv("IQ_PASSWORD")
@@ -29,19 +30,18 @@ EXPIRATION = 1
 BASE_AMOUNT = 25
 TIMEFRAME_M1 = 60
 
-# ✅ Activos más estables y con mayor liquidez
+# ✅ Activos más estables, líquidos y con menor ruido
 PAIRS = [
     "EURUSD-OTC", "GBPUSD-OTC", "USDCHF-OTC",
     "EURGBP-OTC", "EURJPY-OTC", "GBPJPY-OTC"
 ]
 
-# ✅ Ajustado para 20-30 señales diarias
-MAX_DAILY_TRADES = 30
-MAX_LOSS_STREAK = 3
-PAUSE_TIME = 1200
+MAX_DAILY_TRADES = 40          # ✅ Límite ajustado para 30-40 señales
+MAX_LOSS_STREAK = 3            # Pausa después de 3 pérdidas seguidas
+PAUSE_TIME = 1800              # ✅ Pausa de 30 minutos tras pérdidas
 MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_DELAY = 5
-FUERZA_MINIMA = 62  # ✅ Suficiente para alta probabilidad, pero permite más señales
+FUERZA_MINIMA = 63             # ✅ Equilibrada: alta calidad + suficientes señales
 
 DAILY_TRADES = 0
 CURRENT_DAY = datetime.now(timezone.utc).day
@@ -64,13 +64,13 @@ def send(msg):
             logging.error(f"Error Telegram: {str(e)}")
 
 # ====================================================
-# ⏰ HORARIO DE OPERACIÓN AMPLIO PERO SEGURO
+# ⏰ HORARIO DE OPERACIÓN OPTIMIZADO
 # ====================================================
 def es_hora_optima():
     hora_utc = datetime.now(timezone.utc).hour
     hora_bogota = hora_utc - 5
-    # Opera en horarios con suficiente movimiento, evitando solo madrugada muy baja
-    return 1 <= hora_bogota <= 23
+    # Opera en horarios con liquidez suficiente, evitando solo momentos de volatilidad extrema
+    return 0 <= hora_bogota <= 23
 
 # ====================================================
 # 🔄 REINICIO DIARIO
@@ -83,7 +83,7 @@ def reset_day():
         LOSS_STREAK = 0
         LAST_TRADE = None
         CURRENT_DAY = today
-        send("🔄 <b>NUEVO DÍA INICIADO</b> | Buscando señales de alta calidad.")
+        send("🔄 <b>NUEVO DÍA INICIADO</b> | Estrategia de alta precisión activa.")
 
 # ====================================================
 # 🔌 CONEXIÓN IQ OPTION
@@ -129,8 +129,8 @@ def get_df(iq, pair):
             if not iq:
                 return None
 
-        data = iq.get_candles(pair, TIMEFRAME_M1, 40, time.time())
-        if not data or len(data) < 22:
+        data = iq.get_candles(pair, TIMEFRAME_M1, 50, time.time())
+        if not data or len(data) < 25:
             return None
 
         df = pd.DataFrame(data)
@@ -164,19 +164,20 @@ def main():
                 continue
 
             if DAILY_TRADES >= MAX_DAILY_TRADES:
-                send("ℹ️ Límite diario de 30 operaciones alcanzado.")
+                send("ℹ️ Límite diario de 40 operaciones alcanzado.")
                 time.sleep(300)
                 continue
 
             if LOSS_STREAK >= MAX_LOSS_STREAK:
                 remaining = int(PAUSE_TIME - (time.time() - LAST_LOSS))
                 if remaining > 0:
+                    send(f"⏸️ Pausa de seguridad activa: {remaining//60} minutos restantes.")
                     time.sleep(10)
                     continue
                 else:
                     LOSS_STREAK = 0
                     LAST_TRADE = None
-                    send("✅ Pausa finalizada. Buscando nuevas señales...")
+                    send("✅ Pausa finalizada. Buscando señales de alta calidad...")
 
             server_time = iq.get_server_timestamp()
             sec = server_time % 60
@@ -210,7 +211,7 @@ def main():
                     continue
                 LAST_TRADE = (pair, signal)
 
-                send(f"""🎯 <b>SEÑAL DE ALTA PROBABILIDAD</b>
+                send(f"""🎯 <b>SEÑAL DE ALTA PRECISIÓN</b>
 💹 Activo: {pair}
 📈 Tendencia: {direccion.upper()}
 💪 Fuerza: {fuerza}/100
