@@ -3,8 +3,8 @@ import pandas as pd
 
 # ==================================================
 # 🚀 ESTRATEGIA: SOLO A FAVOR DE LA TENDENCIA
-# ✅ LÓGICA NUEVA:
-# 1. Definir tendencia principal en marco de 5 minutos
+# ✅ LÓGICA:
+# 1. Definir tendencia principal en marco de 15 minutos
 # 2. Buscar entradas solo en la misma dirección
 # 3. Confirmar continuidad y fuerza en 1 minuto
 # 4. NUNCA operar en contra de la tendencia
