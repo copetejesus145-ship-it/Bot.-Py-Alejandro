@@ -1,109 +1,86 @@
-import numpy as np
 import pandas as pd
+import numpy as np
 
-# ==================================================
-# 🚀 ESTRATEGIA: SOLO A FAVOR DE LA TENDENCIA
-# ✅ LÓGICA:
-# 1. Definir tendencia principal en marco de 15 minutos
-# 2. Buscar entradas solo en la misma dirección
-# 3. Confirmar continuidad y fuerza en 1 minuto
-# 4. NUNCA operar en contra de la tendencia
-# ==================================================
-
-def get_trend_signal(df_tendencia, df_entrada):
+def get_signal(df):
     """
-    Devuelve (señal, fuerza, direccion) o None
-    Solo genera señal si coincide con la tendencia principal
+    Estrategia por ESTRUCTURA DE MERCADO
+    Analiza:
+    - Niveles de soporte y resistencia
+    - Fuerza del movimiento
+    - Rupturas o rechazos de niveles clave
+    - Volatilidad del activo
+    - No usa conteo fijo de velas, solo comportamiento del precio
     """
-
-    if len(df_tendencia) < 15 or len(df_entrada) < 10:
+    if df is None or len(df) < 20:
         return None
 
+    # Trabajamos con todo el historial disponible para ver la estructura
+    data = df.copy()
+
     # ======================================
-    # 🔍 PASO 1: DEFINIR TENDENCIA PRINCIPAL
+    # 1. INDICADORES PARA MEDIR ESTRUCTURA
     # ======================================
-    ultimas_tendencia = df_tendencia.tail(12).copy()
-    maximos = ultimas_tendencia['high'].values
-    minimos = ultimas_tendencia['low'].values
-    cierres = ultimas_tendencia['close'].values
+    # Medias móviles para ver tendencia general
+    data['ma_rapida'] = data['close'].rolling(window=5).mean()
+    data['ma_lenta'] = data['close'].rolling(window=15).mean()
+    
+    # Rango verdadero para medir volatilidad
+    data['rango'] = data['high'] - data['low']
+    rango_promedio = data['rango'].tail(10).mean()
 
-    tendencia = "lateral"
-    fuerza_base = 0
-
-    # Tendencia alcista: máximos y mínimos crecientes
-    if (maximos[-1] > maximos[-3] > maximos[-6] and
-        minimos[-1] > minimos[-3] > minimos[-6] and
-        cierres[-1] > cierres[-6]):
-        tendencia = "alcista"
-        fuerza_base += 35
-
-    # Tendencia bajista: máximos y mínimos decrecientes
-    elif (maximos[-1] < maximos[-3] < maximos[-6] and
-          minimos[-1] < minimos[-3] < minimos[-6] and
-          cierres[-1] < cierres[-6]):
-        tendencia = "bajista"
-        fuerza_base += 35
-
-    # Si no hay tendencia clara: no operar
-    if tendencia == "lateral":
+    # Últimas 3 velas cerradas para ver comportamiento reciente
+    ultimas = data.tail(3).copy()
+    if len(ultimas) < 3:
         return None
 
-    # ======================================
-    # 📊 PASO 2: BUSCAR ENTRADA A FAVOR
-    # ======================================
-    ultimas_entrada = df_entrada.tail(6).copy()
-    ultimas_entrada['tipo'] = np.where(ultimas_entrada['close'] > ultimas_entrada['open'], 1, -1)
-    secuencia = ultimas_entrada['tipo'].tolist()
+    vela_anterior_2 = ultimas.iloc[0]
+    vela_anterior_1 = ultimas.iloc[1]
+    vela_actual = ultimas.iloc[2]
 
     # ======================================
-    # 🛡️ FILTROS DE CONFIRMACIÓN
+    # 2. DETECCIÓN DE NIVELES CLAVE
     # ======================================
-    df_analisis = df_entrada.tail(10).copy()
-    df_analisis['rango'] = df_analisis['high'] - df_analisis['low']
-    rango_prom = df_analisis['rango'].mean()
-    volumen_prom = df_analisis['volume'].mean()
+    # Soporte y resistencia locales
+    resistencia = max(vela_anterior_2['high'], vela_anterior_1['high'])
+    soporte = min(vela_anterior_2['low'], vela_anterior_1['low'])
 
-    v1 = ultimas_entrada.iloc[-1]
-    v2 = ultimas_entrada.iloc[-2]
-    v3 = ultimas_entrada.iloc[-3]
+    # ======================================
+    # 3. CONDICIONES DE ESTRUCTURA
+    # ======================================
+    # Señal CALL (SUBE): Rechazo en soporte o ruptura de resistencia con fuerza
+    condicion_call = False
+    if (
+        # Rechazo en zona de soporte
+        (vela_actual['low'] <= soporte and vela_actual['close'] > vela_actual['open'] and 
+         (vela_actual['close'] - vela_actual['low']) > (rango_promedio * 0.6))
+        or
+        # Ruptura de resistencia con volumen/fuerza
+        (vela_actual['high'] > resistencia and vela_actual['close'] > resistencia and
+         vela_actual['close'] > vela_actual['ma_rapida'] and
+         vela_actual['ma_rapida'] > vela_actual['ma_lenta'])
+    ):
+        condicion_call = True
 
-    # Tamaño de vela suficiente
-    tamaño_prom = ((v1.high - v1.low) + (v2.high - v2.low) + (v3.high - v3.low)) / 3
-    if tamaño_prom < rango_prom * 0.5:
+    # Señal PUT (BAJA): Rechazo en resistencia o ruptura de soporte con fuerza
+    condicion_put = False
+    if (
+        # Rechazo en zona de resistencia
+        (vela_actual['high'] >= resistencia and vela_actual['close'] < vela_actual['open'] and
+         (vela_actual['high'] - vela_actual['close']) > (rango_promedio * 0.6))
+        or
+        # Ruptura de soporte con fuerza
+        (vela_actual['low'] < soporte and vela_actual['close'] < soporte and
+         vela_actual['close'] < vela_actual['ma_rapida'] and
+         vela_actual['ma_rapida'] < vela_actual['ma_lenta'])
+    ):
+        condicion_put = True
+
+    # ======================================
+    # 4. DEVOLVER SEÑAL
+    # ======================================
+    if condicion_call and not condicion_put:
+        return "call"
+    elif condicion_put and not condicion_call:
+        return "put"
+    else:
         return None
-    fuerza_base += 15
-
-    # Volumen de confirmación
-    vol_prom = (v1.volume + v2.volume + v3.volume) / 3
-    if vol_prom < volumen_prom * 0.6:
-        return None
-    fuerza_base += 10
-
-    # Cuerpo claro
-    cuerpo_prom = (abs(v1.close - v1.open) + abs(v2.close - v2.open) + abs(v3.close - v3.open)) / 3
-    if cuerpo_prom < tamaño_prom * 0.4:
-        return None
-    fuerza_base += 10
-
-    # ======================================
-    # ✅ DEFINIR SEÑAL FINAL
-    # ======================================
-    if tendencia == "alcista":
-        # Buscar continuidad alcista
-        if secuencia[-3] == 1 and secuencia[-2] == 1 and secuencia[-1] == 1:
-            fuerza_base += 20
-            return ("call", min(fuerza_base, 100), "alcista")
-
-    elif tendencia == "bajista":
-        # Buscar continuidad bajista
-        if secuencia[-3] == -1 and secuencia[-2] == -1 and secuencia[-1] == -1:
-            fuerza_base += 20
-            return ("put", min(fuerza_base, 100), "bajista")
-
-    return None
-
-# ====================================================
-# 🔄 Alias de compatibilidad
-# ====================================================
-def pro_signal(df):
-    return None
