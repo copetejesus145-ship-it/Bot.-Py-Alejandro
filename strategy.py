@@ -2,14 +2,14 @@ import numpy as np
 import pandas as pd
 
 # ==================================================
-# 🚀 ESTRATEGIA AJUSTADA - MÁS OPERACIONES
-# ✅ Errores de Series eliminados definitivamente
-# ✅ Condiciones flexibilizadas para más entradas
-# ✅ Estable en Railway
+# 🚀 ESTRATEGIA ESTABLE - MISMA LÓGICA PARA TODOS LOS PARES
+# ✅ Sin errores de Series
+# ✅ Funciona con todos los activos de la lista
+# ✅ Condiciones equilibradas para mayor frecuencia
 # ==================================================
 
 def get_trend_signal(df):
-    if len(df) < 30:
+    if len(df) < 25:
         return None
 
     df = df.copy()
@@ -88,7 +88,6 @@ def get_trend_signal(df):
 
         o1 = float(df['open'].iloc[-1])
         o2 = float(df['open'].iloc[-2])
-        o3 = float(df['open'].iloc[-3])
 
         macd1 = float(df['macd'].iloc[-1])
         sig1 = float(df['signal'].iloc[-1])
@@ -97,16 +96,16 @@ def get_trend_signal(df):
 
         rsi1 = float(df['rsi'].iloc[-1])
         vol1 = float(df['volume'].iloc[-1])
-        vol_prom = float(df['volume'].iloc[-15:-1].mean())
-        rango_prom = float((df['high'].iloc[-15:-1] - df['low'].iloc[-15:-1]).mean())
+        vol_prom = float(df['volume'].iloc[-12:-1].mean())
+        rango_prom = float((df['high'].iloc[-12:-1] - df['low'].iloc[-12:-1]).mean())
 
     except Exception:
         return None
 
     # --------------------------
-    # CONDICIONES FLEXIBILIZADAS
+    # CONDICIONES DE ENTRADA
     # --------------------------
-    if adx1 < 22.0:  # Reducido de 27 a 22
+    if adx1 < 20.0:
         return None
 
     fuerza = 0
@@ -116,54 +115,54 @@ def get_trend_signal(df):
     # ✅ COMPRA
     cond_compra = (
         e8_1 > e13_1 > e21_1 > e34_1 and
-        l1 > l2 and l2 > l3 and
+        l1 > l2 and
         h1 > h2 and
-        c1 > e8_1 and c1 < e21_1 * 1.02 and
+        c1 > e8_1 and c1 < e21_1 * 1.025 and
         macd1 > sig1 and hist1 > hist2 and
-        48.0 < rsi1 < 68.0 and  # Rango ampliado
+        47.0 < rsi1 < 69.0 and
         c1 > o1 and c2 > o2
     )
 
     if cond_compra:
-        distancia = (c1 - e21_1) / e21_1 * 100.0
-        if distancia <= 1.8:  # Mayor tolerancia
+        distancia = abs((c1 - e21_1) / e21_1) * 100.0
+        if distancia <= 2.0:
             senal = "call"
             tipo = "alcista"
-            fuerza = 65
+            fuerza = 62
 
     # ✅ VENTA
     cond_venta = (
         e8_1 < e13_1 < e21_1 < e34_1 and
-        h1 < h2 and h2 < h3 and
+        h1 < h2 and
         l1 < l2 and
-        c1 < e8_1 and c1 > e21_1 * 0.98 and
+        c1 < e8_1 and c1 > e21_1 * 0.975 and
         macd1 < sig1 and hist1 < hist2 and
-        32.0 < rsi1 < 52.0 and  # Rango ampliado
+        31.0 < rsi1 < 53.0 and
         c1 < o1 and c2 < o2
     )
 
     if cond_venta:
-        distancia = (e21_1 - c1) / e21_1 * 100.0
-        if distancia <= 1.8:  # Mayor tolerancia
+        distancia = abs((e21_1 - c1) / e21_1) * 100.0
+        if distancia <= 2.0:
             senal = "put"
             tipo = "bajista"
-            fuerza = 65
+            fuerza = 62
 
     if senal is None:
         return None
 
     # Filtros de calidad
     vela_tam = h1 - l1
-    if vela_tam < rango_prom * 0.55:
+    if vela_tam < rango_prom * 0.5:
         return None
     fuerza += 10
 
-    if vol1 < vol_prom * 0.7:
+    if vol1 < vol_prom * 0.65:
         return None
     fuerza += 10
 
     cuerpo = abs(c1 - o1)
-    if cuerpo < vela_tam * 0.45:
+    if cuerpo < vela_tam * 0.4:
         return None
     fuerza += 10
 
