@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN PARA MÁXIMA FRECUENCIA
+# ⚙️ CONFIGURACIÓN ESTABLE + MÁS SEÑALES
 # ==========================================
 EMAIL = os.getenv("IQ_EMAIL")
 PASSWORD = os.getenv("IQ_PASSWORD")
@@ -28,7 +28,7 @@ EXPIRATION = 1
 BASE_AMOUNT = 25
 TIMEFRAME_M1 = 60
 
-# ✅ LISTA COMPLETA DE PARES DISPONIBLES
+# Lista completa de pares
 PAIRS = [
     "EURUSD-OTC", "GBPUSD-OTC", "USDCHF-OTC", "USDJPY-OTC",
     "EURGBP-OTC", "EURJPY-OTC", "GBPJPY-OTC", "AUDUSD-OTC",
@@ -38,12 +38,12 @@ PAIRS = [
     "EURNZD-OTC", "NZDCAD-OTC"
 ]
 
-MAX_DAILY_TRADES = 80       # Límite alto para aprovechar todas las señales
-MAX_LOSS_STREAK = 4         # Más tolerancia a rachas negativas
-PAUSE_TIME = 1200           # Pausa corta: 20 minutos
-MAX_RECONNECT_ATTEMPTS = 5
-RECONNECT_DELAY = 5
-FUERZA_MINIMA = 50          # Umbral bajo para aceptar más señales
+MAX_DAILY_TRADES = 80
+MAX_LOSS_STREAK = 4
+PAUSE_TIME = 1200
+MAX_RECONNECT_ATTEMPTS = 8  # Más reintentos de conexión
+RECONNECT_DELAY = 7
+FUERZA_MINIMA = 50
 
 # Variables globales
 DAILY_TRADES = 0
@@ -94,7 +94,7 @@ def listen_commands():
                 if text == "/start":
                     if not BOT_RUNNING:
                         BOT_RUNNING = True
-                        send("✅ <b>BOT INICIADO</b>\nAnalizando todos los pares, buscando señales frecuentes...")
+                        send("✅ <b>BOT INICIADO</b>\nAnalizando 22 activos, buscando señales frecuentes...")
                     else:
                         send("ℹ️ El bot ya está activo.")
                 elif text == "/stop":
@@ -123,7 +123,7 @@ def reset_day():
             send("🔄 <b>NUEVO DÍA</b> | Contadores reiniciados.")
 
 # ====================================================
-# 🔌 CONEXIÓN IQ OPTION
+# 🔌 CONEXIÓN IQ OPTION (CORREGIDA)
 # ====================================================
 def connect():
     attempts = 0
@@ -136,44 +136,59 @@ def connect():
                 continue
 
             iq = IQ_Option(EMAIL, PASSWORD)
+            # Desactivamos modo debug que genera errores
+            iq.set_debug(False)
             ok, reason = iq.connect()
+            
             if ok:
-                iq.change_balance("PRACTICE")
-                balance = iq.get_balance()
-                send(f"✅ <b>CONECTADO</b>\nSaldo: ${balance:.2f}\nAnalizando {len(PAIRS)} activos.")
-                return iq
+                try:
+                    iq.change_balance("PRACTICE")
+                    balance = iq.get_balance()
+                    send(f"✅ <b>CONECTADO</b>\nSaldo: ${balance:.2f}\nAnalizando 22 activos.")
+                    return iq
+                except Exception as e:
+                    send(f"⚠️ Error al cargar saldo: {str(e)} | Reintentando...")
+                    iq = None
             else:
                 send(f"❌ Conexión fallida: {reason}")
+                
         except Exception as e:
             send(f"❌ Error conexión: {str(e)}")
+        
         attempts += 1
         time.sleep(RECONNECT_DELAY)
-    send("💥 Reintentando en 30 segundos...")
-    time.sleep(30)
+    
+    send("💥 Demasiados errores. Reintentando en 60 segundos...")
+    time.sleep(60)
     return connect()
 
 # ====================================================
-# 📥 OBTENER DATOS
+# 📥 OBTENER DATOS (CORREGIDA CON REINTENTOS)
 # ====================================================
-def get_df(iq, pair):
-    try:
-        if not iq.check_connect():
-            iq = connect()
-            if not iq:
-                return None
+def get_df(iq, pair, retries=2):
+    for _ in range(retries):
+        try:
+            if not iq or not iq.check_connect():
+                iq = connect()
+                if not iq:
+                    time.sleep(1)
+                    continue
 
-        data = iq.get_candles(pair, TIMEFRAME_M1, 30, time.time())
-        if not data or len(data) < 15:
-            return None
+            data = iq.get_candles(pair, TIMEFRAME_M1, 30, time.time())
+            if not data or len(data) < 15:
+                time.sleep(0.5)
+                continue
 
-        df = pd.DataFrame(data)
-        df.rename(columns={"max": "high", "min": "low"}, inplace=True)
-        df[["open", "close", "high", "low", "volume"]] = df[["open", "close", "high", "low", "volume"]].astype(float)
-        return df
+            df = pd.DataFrame(data)
+            df.rename(columns={"max": "high", "min": "low"}, inplace=True)
+            df[["open", "close", "high", "low", "volume"]] = df[["open", "close", "high", "low", "volume"]].astype(float)
+            return df
 
-    except Exception as e:
-        logging.error(f"Datos {pair}: {str(e)}")
-        return None
+        except Exception as e:
+            logging.error(f"Datos {pair}: {str(e)}")
+            time.sleep(0.8)
+    
+    return None
 
 # ====================================================
 # 🧠 BUCLE PRINCIPAL
@@ -184,7 +199,7 @@ def main():
 
     iq = connect()
     last_candle = None
-    send("ℹ️ <b>SISTEMA LISTO</b>\nEnvía /start para iniciar búsqueda intensiva de señales.")
+    send("ℹ️ <b>SISTEMA LISTO</b>\nEnvía /start para iniciar búsqueda de señales.")
 
     while True:
         try:
@@ -194,7 +209,7 @@ def main():
 
             reset_day()
 
-            if not iq.check_connect():
+            if not iq or not iq.check_connect():
                 iq = connect()
                 time.sleep(2)
                 continue
@@ -228,7 +243,6 @@ def main():
             mejor_opcion = None
             mayor_fuerza = 0
 
-            # Ventana de búsqueda ampliada
             if 15 <= sec <= 59:
                 for pair in PAIRS:
                     df = get_df(iq, pair)
@@ -285,7 +299,7 @@ def main():
             time.sleep(0.01)
 
         except Exception as e:
-            send(f"💥 Error: {str(e)} | Reiniciando...")
+            send(f"💥 Error: {str(e)} | Reiniciando conexión...")
             logging.exception("Error en bucle principal")
             time.sleep(3)
             try:
