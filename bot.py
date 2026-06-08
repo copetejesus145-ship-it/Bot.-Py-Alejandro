@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN AJUSTADA PARA MÁS OPERACIONES
+# ⚙️ CONFIGURACIÓN - LISTA AMPLIADA DE PARES
 # ==========================================
 EMAIL = os.getenv("IQ_EMAIL")
 PASSWORD = os.getenv("IQ_PASSWORD")
@@ -28,19 +28,20 @@ EXPIRATION = 1
 BASE_AMOUNT = 25
 TIMEFRAME_M1 = 60
 
-# Lista ampliada de activos para tener más oportunidades
+# ✅ LISTA AMPLIADA A 16 PARES (OTC + REAL)
 PAIRS = [
     "EURUSD-OTC", "GBPUSD-OTC", "USDCHF-OTC", "USDJPY-OTC",
     "EURGBP-OTC", "EURJPY-OTC", "GBPJPY-OTC", "AUDUSD-OTC",
-    "USDCAD-OTC", "NZDUSD-OTC"
+    "USDCAD-OTC", "NZDUSD-OTC", "AUDJPY-OTC", "CADJPY-OTC",
+    "GBPAUD-OTC", "EURAUD-OTC", "AUDCAD-OTC", "NZDJPY-OTC"
 ]
 
-MAX_DAILY_TRADES = 40  # Aumentado de 28 a 40
-MAX_LOSS_STREAK = 3    # Aumentado de 2 a 3
-PAUSE_TIME = 1800      # Reducido de 2400 a 1800 (30min)
+MAX_DAILY_TRADES = 50       # Más límite por tener más activos
+MAX_LOSS_STREAK = 3
+PAUSE_TIME = 1800
 MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_DELAY = 5
-FUERZA_MINIMA = 65     # Reducido de 72 a 65 para aceptar más señales
+FUERZA_MINIMA = 62          # Umbral un poco más bajo para más señales
 
 # Variables globales
 DAILY_TRADES = 0
@@ -91,7 +92,7 @@ def listen_commands():
                 if text == "/start":
                     if not BOT_RUNNING:
                         BOT_RUNNING = True
-                        send("✅ <b>BOT INICIADO</b>\nAnalizando gráficos en vivo y buscando entradas...")
+                        send("✅ <b>BOT INICIADO</b>\nAnalizando 16 pares en vivo y buscando entradas...")
                     else:
                         send("ℹ️ El bot ya está activo.")
                 elif text == "/stop":
@@ -137,7 +138,7 @@ def connect():
             if ok:
                 iq.change_balance("PRACTICE")
                 balance = iq.get_balance()
-                send(f"✅ <b>CONECTADO EXITOSAMENTE</b>\nSaldo: ${balance:.2f}\nLeyendo datos en tiempo real.")
+                send(f"✅ <b>CONECTADO EXITOSAMENTE</b>\nSaldo: ${balance:.2f}\nAnalizando {len(PAIRS)} activos.")
                 return iq
             else:
                 send(f"❌ Conexión fallida: {reason}")
@@ -159,8 +160,8 @@ def get_df(iq, pair):
             if not iq:
                 return None
 
-        data = iq.get_candles(pair, TIMEFRAME_M1, 60, time.time())
-        if not data or len(data) < 30:  # Reducido de 40 a 30 para mayor agilidad
+        data = iq.get_candles(pair, TIMEFRAME_M1, 40, time.time())
+        if not data or len(data) < 25:
             return None
 
         df = pd.DataFrame(data)
@@ -181,7 +182,7 @@ def main():
 
     iq = connect()
     last_candle = None
-    send("ℹ️ <b>SISTEMA LISTO</b>\nEnvía /start para iniciar la detección de entradas.")
+    send("ℹ️ <b>SISTEMA LISTO</b>\nEnvía /start para iniciar análisis de todos los pares.")
 
     while True:
         try:
@@ -218,14 +219,15 @@ def main():
             current_candle = int(server_time // 60)
 
             if current_candle == last_candle:
-                time.sleep(0.1)
+                time.sleep(0.05)
                 continue
             last_candle = current_candle
 
             mejor_opcion = None
             mayor_fuerza = 0
 
-            if 30 <= sec <= 58:  # Ventana de búsqueda ampliada
+            # Búsqueda en TODOS los pares
+            if 25 <= sec <= 58:
                 for pair in PAIRS:
                     df = get_df(iq, pair)
                     if df is None:
@@ -278,12 +280,12 @@ def main():
                 else:
                     send(f"❌ No se pudo ejecutar la operación en {pair}")
 
-            time.sleep(0.05)
+            time.sleep(0.02)
 
         except Exception as e:
             send(f"💥 Error: {str(e)} | Reiniciando...")
             logging.exception("Error en bucle principal")
-            time.sleep(5)
+            time.sleep(3)
             try:
                 iq = connect()
             except:
