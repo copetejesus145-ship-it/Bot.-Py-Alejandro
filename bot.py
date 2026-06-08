@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN OPTIMIZADA PARA MÁS SEÑALES
+# ⚙️ CONFIGURACIÓN PARA MÁXIMA FRECUENCIA
 # ==========================================
 EMAIL = os.getenv("IQ_EMAIL")
 PASSWORD = os.getenv("IQ_PASSWORD")
@@ -28,21 +28,22 @@ EXPIRATION = 1
 BASE_AMOUNT = 25
 TIMEFRAME_M1 = 60
 
-# ✅ LISTA AMPLIADA A 20 PARES (más opciones = más señales)
+# ✅ LISTA COMPLETA DE PARES DISPONIBLES
 PAIRS = [
     "EURUSD-OTC", "GBPUSD-OTC", "USDCHF-OTC", "USDJPY-OTC",
     "EURGBP-OTC", "EURJPY-OTC", "GBPJPY-OTC", "AUDUSD-OTC",
     "USDCAD-OTC", "NZDUSD-OTC", "AUDJPY-OTC", "CADJPY-OTC",
     "GBPAUD-OTC", "EURAUD-OTC", "AUDCAD-OTC", "NZDJPY-OTC",
-    "GBPCAD-OTC", "EURCAD-OTC", "AUDNZD-OTC", "GBPNZD-OTC"
+    "GBPCAD-OTC", "EURCAD-OTC", "AUDNZD-OTC", "GBPNZD-OTC",
+    "EURNZD-OTC", "NZDCAD-OTC"
 ]
 
-MAX_DAILY_TRADES = 60       # Aumentado para aprovechar más señales
-MAX_LOSS_STREAK = 3
-PAUSE_TIME = 1500           # Pausa más corta (25 min)
+MAX_DAILY_TRADES = 80       # Límite alto para aprovechar todas las señales
+MAX_LOSS_STREAK = 4         # Más tolerancia a rachas negativas
+PAUSE_TIME = 1200           # Pausa corta: 20 minutos
 MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_DELAY = 5
-FUERZA_MINIMA = 58          # Umbral más bajo para aceptar señales válidas
+FUERZA_MINIMA = 50          # Umbral bajo para aceptar más señales
 
 # Variables globales
 DAILY_TRADES = 0
@@ -93,7 +94,7 @@ def listen_commands():
                 if text == "/start":
                     if not BOT_RUNNING:
                         BOT_RUNNING = True
-                        send("✅ <b>BOT INICIADO</b>\nAnalizando 20 pares, buscando señales frecuentes...")
+                        send("✅ <b>BOT INICIADO</b>\nAnalizando todos los pares, buscando señales frecuentes...")
                     else:
                         send("ℹ️ El bot ya está activo.")
                 elif text == "/stop":
@@ -139,7 +140,7 @@ def connect():
             if ok:
                 iq.change_balance("PRACTICE")
                 balance = iq.get_balance()
-                send(f"✅ <b>CONECTADO</b>\nSaldo: ${balance:.2f}\nAnalizando todos los pares.")
+                send(f"✅ <b>CONECTADO</b>\nSaldo: ${balance:.2f}\nAnalizando {len(PAIRS)} activos.")
                 return iq
             else:
                 send(f"❌ Conexión fallida: {reason}")
@@ -161,8 +162,8 @@ def get_df(iq, pair):
             if not iq:
                 return None
 
-        data = iq.get_candles(pair, TIMEFRAME_M1, 35, time.time())
-        if not data or len(data) < 20:
+        data = iq.get_candles(pair, TIMEFRAME_M1, 30, time.time())
+        if not data or len(data) < 15:
             return None
 
         df = pd.DataFrame(data)
@@ -183,7 +184,7 @@ def main():
 
     iq = connect()
     last_candle = None
-    send("ℹ️ <b>SISTEMA LISTO</b>\nEnvía /start para iniciar la búsqueda de señales.")
+    send("ℹ️ <b>SISTEMA LISTO</b>\nEnvía /start para iniciar búsqueda intensiva de señales.")
 
     while True:
         try:
@@ -199,7 +200,7 @@ def main():
                 continue
 
             if DAILY_TRADES >= MAX_DAILY_TRADES:
-                send("ℹ️ Límite diario alcanzado.")
+                send("ℹ️ Límite diario de operaciones alcanzado.")
                 BOT_RUNNING = False
                 time.sleep(300)
                 continue
@@ -207,20 +208,20 @@ def main():
             if LOSS_STREAK >= MAX_LOSS_STREAK:
                 restante = int(PAUSE_TIME - (time.time() - LAST_LOSS))
                 if restante > 0:
-                    send(f"⏸️ Pausa: {restante//60} min restantes.")
+                    send(f"⏸️ Pausa de seguridad: {restante//60} minutos restantes.")
                     time.sleep(10)
                     continue
                 else:
                     LOSS_STREAK = 0
                     LAST_TRADE = None
-                    send("✅ Pausa finalizada. Buscando señales...")
+                    send("✅ Pausa finalizada. Buscando nuevas entradas...")
 
             server_time = iq.get_server_timestamp()
             sec = server_time % 60
             current_candle = int(server_time // 60)
 
             if current_candle == last_candle:
-                time.sleep(0.03)
+                time.sleep(0.02)
                 continue
             last_candle = current_candle
 
@@ -228,7 +229,7 @@ def main():
             mayor_fuerza = 0
 
             # Ventana de búsqueda ampliada
-            if 20 <= sec <= 58:
+            if 15 <= sec <= 59:
                 for pair in PAIRS:
                     df = get_df(iq, pair)
                     if df is None:
@@ -241,47 +242,47 @@ def main():
                             mayor_fuerza = fuerza
                             mejor_opcion = (pair, signal, fuerza, direccion)
 
-            if 56 <= sec <= 59.9 and mejor_opcion is not None:
+            if 57 <= sec <= 59.9 and mejor_opcion is not None:
                 pair, signal, fuerza, direccion = mejor_opcion
 
                 if (pair, signal) == LAST_TRADE:
                     continue
                 LAST_TRADE = (pair, signal)
 
-                send(f"""🎯 <b>SEÑAL ENCONTRADA</b>
+                send(f"""🎯 <b>SEÑAL DETECTADA</b>
 💹 Activo: {pair}
 📈 Tendencia: {direccion.upper()}
 💪 Fuerza: {fuerza}/100
 📊 Operación: {'🟢 COMPRA' if signal == 'call' else '🔴 VENTA'}
-⏱️ Vencimiento: 1 min""")
+⏱️ Vencimiento: 1 minuto""")
 
                 status, trade_id = iq.buy(BASE_AMOUNT, pair, signal, EXPIRATION)
 
                 if status:
                     DAILY_TRADES += 1
-                    send(f"🚀 <b>EJECUTADA</b> | Monto: ${BASE_AMOUNT:.2f} | Total: {DAILY_TRADES}/{MAX_DAILY_TRADES}")
+                    send(f"🚀 <b>OPERACIÓN EJECUTADA</b>\nMonto: ${BASE_AMOUNT:.2f} | Total hoy: {DAILY_TRADES}/{MAX_DAILY_TRADES}")
 
                     time.sleep(65)
                     try:
                         res = iq.check_win_v4(trade_id)
                         if res is None:
-                            send("⚠️ Resultado no verificado.")
+                            send("⚠️ No se pudo verificar el resultado.")
                             continue
 
                         if res < 0:
                             LOSS_STREAK += 1
                             LAST_LOSS = time.time()
-                            send(f"❌ <b>PERDIDA</b> | -${abs(res):.2f}\nRacha: {LOSS_STREAK}/{MAX_LOSS_STREAK}")
+                            send(f"❌ <b>OPERACIÓN PERDIDA</b> | -${abs(res):.2f}\nRacha: {LOSS_STREAK}/{MAX_LOSS_STREAK}")
                         else:
                             LOSS_STREAK = 0
-                            send(f"✅ <b>GANADA</b> | +${res:.2f}\n_________________________")
+                            send(f"✅ <b>OPERACIÓN GANADA</b> | +${res:.2f}\n_________________________")
 
                     except Exception as e:
                         send(f"⚠️ Error al verificar: {str(e)}")
                 else:
-                    send(f"❌ No se pudo ejecutar en {pair}")
+                    send(f"❌ No se pudo ejecutar la operación en {pair}")
 
-            time.sleep(0.02)
+            time.sleep(0.01)
 
         except Exception as e:
             send(f"💥 Error: {str(e)} | Reiniciando...")
@@ -296,6 +297,6 @@ if __name__ == "__main__":
     required = ["IQ_EMAIL", "IQ_PASSWORD", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"]
     missing = [v for v in required if not os.getenv(v)]
     if missing:
-        print(f"❌ Faltan variables: {', '.join(missing)}")
+        print(f"❌ Faltan variables de entorno: {', '.join(missing)}")
         sys.exit(1)
     main()
