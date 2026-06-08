@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN ESTABLE + MÁS SEÑALES
+# ⚙️ CONFIGURACIÓN COMPATIBLE Y OPTIMIZADA
 # ==========================================
 EMAIL = os.getenv("IQ_EMAIL")
 PASSWORD = os.getenv("IQ_PASSWORD")
@@ -28,7 +28,7 @@ EXPIRATION = 1
 BASE_AMOUNT = 25
 TIMEFRAME_M1 = 60
 
-# Lista completa de pares
+# Lista completa de pares para mayor cantidad de señales
 PAIRS = [
     "EURUSD-OTC", "GBPUSD-OTC", "USDCHF-OTC", "USDJPY-OTC",
     "EURGBP-OTC", "EURJPY-OTC", "GBPJPY-OTC", "AUDUSD-OTC",
@@ -41,7 +41,7 @@ PAIRS = [
 MAX_DAILY_TRADES = 80
 MAX_LOSS_STREAK = 4
 PAUSE_TIME = 1200
-MAX_RECONNECT_ATTEMPTS = 8  # Más reintentos de conexión
+MAX_RECONNECT_ATTEMPTS = 8
 RECONNECT_DELAY = 7
 FUERZA_MINIMA = 50
 
@@ -123,7 +123,7 @@ def reset_day():
             send("🔄 <b>NUEVO DÍA</b> | Contadores reiniciados.")
 
 # ====================================================
-# 🔌 CONEXIÓN IQ OPTION (CORREGIDA)
+# 🔌 CONEXIÓN IQ OPTION (SIN ERRORES DE ATRIBUTOS)
 # ====================================================
 def connect():
     attempts = 0
@@ -136,18 +136,17 @@ def connect():
                 continue
 
             iq = IQ_Option(EMAIL, PASSWORD)
-            # Desactivamos modo debug que genera errores
-            iq.set_debug(False)
+            # Eliminado el método set_debug que no existe en versiones actuales
             ok, reason = iq.connect()
             
             if ok:
                 try:
                     iq.change_balance("PRACTICE")
                     balance = iq.get_balance()
-                    send(f"✅ <b>CONECTADO</b>\nSaldo: ${balance:.2f}\nAnalizando 22 activos.")
+                    send(f"✅ <b>CONECTADO EXITOSAMENTE</b>\nSaldo: ${balance:.2f}\nAnalizando 22 activos.")
                     return iq
                 except Exception as e:
-                    send(f"⚠️ Error al cargar saldo: {str(e)} | Reintentando...")
+                    send(f"⚠️ Cargando datos... Reintentando...")
                     iq = None
             else:
                 send(f"❌ Conexión fallida: {reason}")
@@ -158,12 +157,12 @@ def connect():
         attempts += 1
         time.sleep(RECONNECT_DELAY)
     
-    send("💥 Demasiados errores. Reintentando en 60 segundos...")
+    send("💥 Demasiados intentos fallidos. Reintentando en 60 segundos...")
     time.sleep(60)
     return connect()
 
 # ====================================================
-# 📥 OBTENER DATOS (CORREGIDA CON REINTENTOS)
+# 📥 OBTENER DATOS CON REINTENTOS
 # ====================================================
 def get_df(iq, pair, retries=2):
     for _ in range(retries):
