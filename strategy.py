@@ -2,14 +2,14 @@ import numpy as np
 import pandas as pd
 
 # ==================================================
-# 🚀 ESTRATEGIA ESTABLE - MISMA LÓGICA PARA TODOS LOS PARES
-# ✅ Sin errores de Series
-# ✅ Funciona con todos los activos de la lista
-# ✅ Condiciones equilibradas para mayor frecuencia
+# 🚀 ESTRATEGIA FLEXIBILIZADA - MÁS SEÑALES
+# ✅ Sin errores de Pandas
+# ✅ Condiciones menos estrictas
+# ✅ Funciona con todos los pares
 # ==================================================
 
 def get_trend_signal(df):
-    if len(df) < 25:
+    if len(df) < 20:
         return None
 
     df = df.copy()
@@ -76,15 +76,12 @@ def get_trend_signal(df):
 
         l1 = float(df['low'].iloc[-1])
         l2 = float(df['low'].iloc[-2])
-        l3 = float(df['low'].iloc[-3])
 
         h1 = float(df['high'].iloc[-1])
         h2 = float(df['high'].iloc[-2])
-        h3 = float(df['high'].iloc[-3])
 
         c1 = float(df['close'].iloc[-1])
         c2 = float(df['close'].iloc[-2])
-        c3 = float(df['close'].iloc[-3])
 
         o1 = float(df['open'].iloc[-1])
         o2 = float(df['open'].iloc[-2])
@@ -96,73 +93,73 @@ def get_trend_signal(df):
 
         rsi1 = float(df['rsi'].iloc[-1])
         vol1 = float(df['volume'].iloc[-1])
-        vol_prom = float(df['volume'].iloc[-12:-1].mean())
-        rango_prom = float((df['high'].iloc[-12:-1] - df['low'].iloc[-12:-1]).mean())
+        vol_prom = float(df['volume'].iloc[-10:-1].mean())
+        rango_prom = float((df['high'].iloc[-10:-1] - df['low'].iloc[-10:-1]).mean())
 
     except Exception:
         return None
 
     # --------------------------
-    # CONDICIONES DE ENTRADA
+    # CONDICIONES FLEXIBILIZADAS
     # --------------------------
-    if adx1 < 20.0:
+    if adx1 < 18.0:  # Umbral de tendencia más bajo
         return None
 
     fuerza = 0
     senal = None
     tipo = ""
 
-    # ✅ COMPRA
+    # ✅ CONDICIÓN COMPRA
     cond_compra = (
-        e8_1 > e13_1 > e21_1 > e34_1 and
-        l1 > l2 and
-        h1 > h2 and
-        c1 > e8_1 and c1 < e21_1 * 1.025 and
-        macd1 > sig1 and hist1 > hist2 and
-        47.0 < rsi1 < 69.0 and
-        c1 > o1 and c2 > o2
+        e8_1 > e13_1 and e13_1 > e21_1 and
+        l1 >= l2 and
+        h1 >= h2 and
+        c1 > e8_1 and c1 < e21_1 * 1.03 and
+        macd1 > sig1 and hist1 >= hist2 and
+        45.0 < rsi1 < 72.0 and  # Rango RSI ampliado
+        c1 > o1
     )
 
     if cond_compra:
         distancia = abs((c1 - e21_1) / e21_1) * 100.0
-        if distancia <= 2.0:
+        if distancia <= 2.5:  # Mayor tolerancia
             senal = "call"
             tipo = "alcista"
-            fuerza = 62
+            fuerza = 58
 
-    # ✅ VENTA
+    # ✅ CONDICIÓN VENTA
     cond_venta = (
-        e8_1 < e13_1 < e21_1 < e34_1 and
-        h1 < h2 and
-        l1 < l2 and
-        c1 < e8_1 and c1 > e21_1 * 0.975 and
-        macd1 < sig1 and hist1 < hist2 and
-        31.0 < rsi1 < 53.0 and
-        c1 < o1 and c2 < o2
+        e8_1 < e13_1 and e13_1 < e21_1 and
+        h1 <= h2 and
+        l1 <= l2 and
+        c1 < e8_1 and c1 > e21_1 * 0.97 and
+        macd1 < sig1 and hist1 <= hist2 and
+        28.0 < rsi1 < 55.0 and  # Rango RSI ampliado
+        c1 < o1
     )
 
     if cond_venta:
         distancia = abs((e21_1 - c1) / e21_1) * 100.0
-        if distancia <= 2.0:
+        if distancia <= 2.5:  # Mayor tolerancia
             senal = "put"
             tipo = "bajista"
-            fuerza = 62
+            fuerza = 58
 
     if senal is None:
         return None
 
-    # Filtros de calidad
+    # Filtros de calidad (más flexibles)
     vela_tam = h1 - l1
-    if vela_tam < rango_prom * 0.5:
+    if vela_tam < rango_prom * 0.45:
         return None
     fuerza += 10
 
-    if vol1 < vol_prom * 0.65:
+    if vol1 < vol_prom * 0.6:
         return None
     fuerza += 10
 
     cuerpo = abs(c1 - o1)
-    if cuerpo < vela_tam * 0.4:
+    if cuerpo < vela_tam * 0.35:
         return None
     fuerza += 10
 
