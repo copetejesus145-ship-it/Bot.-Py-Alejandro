@@ -8,7 +8,7 @@ import threading
 import logging
 from datetime import datetime, timezone
 
-from strategy import get_momentum_signal # Importamos la nueva función
+from strategy import get_reversal_signal
 from iqoptionapi.stable_api import IQ_Option
 
 logging.basicConfig(
@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN PARA ESTRATEGIA DE MOMENTUM
+# ⚙️ CONFIGURACIÓN - ESTRATEGIA SOPORTE/RESISTENCIA
 # ==========================================
 EMAIL = os.getenv("IQ_EMAIL")
 PASSWORD = os.getenv("IQ_PASSWORD")
@@ -28,7 +28,7 @@ EXPIRATION = 1
 BASE_AMOUNT = 25
 TIMEFRAME_M1 = 60
 
-# ✅ LISTA COMPLETA DE PARES (REAL + OTC)
+# Lista de pares
 PAIRS = [
     "EURUSD", "GBPUSD", "USDCHF", "USDJPY", "EURGBP", "EURJPY", "GBPJPY", "AUDUSD",
     "USDCAD", "NZDUSD", "AUDJPY", "CADJPY", "GBPAUD", "EURAUD", "AUDCAD", "NZDJPY",
@@ -41,12 +41,13 @@ PAIRS = [
     "EURNZD-OTC", "NZDCAD-OTC"
 ]
 
-MAX_DAILY_TRADES = 70       # Ajustado para momentum (puede ser menor pero más preciso)
+MAX_DAILY_TRADES = 60
 MAX_LOSS_STREAK = 4
-PAUSE_TIME = 1200           # Pausa de 20 minutos
+PAUSE_TIME = 1200
 MAX_RECONNECT_ATTEMPTS = 8
 RECONNECT_DELAY = 7
-FUERZA_MINIMA = 65          # Umbral de fuerza MÁS ALTO para señales de momentum
+FUERZA_MINIMA = 60
+TOLERANCIA_NIVEL = 0.0003  # Margen pequeño: 3 pips para considerar "justo en el nivel"
 
 # Variables globales
 DAILY_TRADES = 0
@@ -97,7 +98,7 @@ def listen_commands():
                 if text == "/start":
                     if not BOT_RUNNING:
                         BOT_RUNNING = True
-                        send("✅ <b>BOT INICIADO</b>\nAnalizando todos los activos con estrategia de MOMENTUM...")
+                        send("✅ <b>BOT INICIADO</b>\nEstrategia: Reversión en Soporte/Resistencia")
                     else:
                         send("ℹ️ El bot ya está activo.")
                 elif text == "/stop":
@@ -133,7 +134,7 @@ def connect():
     while attempts < MAX_RECONNECT_ATTEMPTS:
         try:
             if not EMAIL or not PASSWORD:
-                send("❌ ERROR: Credenciales IQ Option no configuradas.")
+                send("❌ ERROR: Credenciales no configuradas.")
                 time.sleep(10)
                 attempts += 1
                 continue
@@ -145,10 +146,10 @@ def connect():
                 try:
                     iq.change_balance("PRACTICE")
                     balance = iq.get_balance()
-                    send(f"✅ <b>CONECTADO EXITOSAMENTE</b>\nSaldo: ${balance:.2f}\nAnalizando {len(PAIRS)} activos.")
+                    send(f"✅ <b>CONECTADO</b>\nSaldo: ${balance:.2f}")
                     return iq
                 except Exception as e:
-                    send(f"⚠️ Error al cargar saldo. Reintentando...")
+                    send(f"⚠️ Cargando datos... Reintentando...")
                     iq = None
             else:
                 send(f"❌ Conexión fallida: {reason}")
@@ -159,12 +160,12 @@ def connect():
         attempts += 1
         time.sleep(RECONNECT_DELAY)
     
-    send("💥 Demasiados intentos fallidos. Reintentando en 60 segundos...")
+    send("💥 Reintentando en 60 segundos...")
     time.sleep(60)
     return connect()
 
 # ====================================================
-# 📥 OBTENER DATOS CON REINTENTOS
+# 📥 OBTENER DATOS
 # ====================================================
 def get_df(iq, pair, retries=3):
     for _ in range(retries):
@@ -175,9 +176,8 @@ def get_df(iq, pair, retries=3):
                     time.sleep(1)
                     continue
 
-            # Necesitamos más velas para el ADX y análisis de momentum
-            data = iq.get_candles(pair, TIMEFRAME_M1, 35, time.time()) 
-            if not data or len(data) < 30: # Requerimos más datos históricos
+            data = iq.get_candles(pair, TIMEFRAME_M1, 40, time.time())
+            if not data or len(data) < 30:
                 time.sleep(0.3)
                 continue
 
@@ -201,7 +201,7 @@ def main():
 
     iq = connect()
     last_candle = None
-    send("ℹ️ <b>SISTEMA LISTO</b>\nEnvía /start para iniciar la búsqueda de señales de momentum.")
+    send("ℹ️ <b>SISTEMA LISTO</b>\nEnvía /start para buscar reversiones en soportes/resistencias.")
 
     while True:
         try:
@@ -217,7 +217,7 @@ def main():
                 continue
 
             if DAILY_TRADES >= MAX_DAILY_TRADES:
-                send("ℹ️ Límite diario de operaciones alcanzado.")
+                send("ℹ️ Límite diario alcanzado.")
                 BOT_RUNNING = False
                 time.sleep(300)
                 continue
@@ -225,13 +225,13 @@ def main():
             if LOSS_STREAK >= MAX_LOSS_STREAK:
                 restante = int(PAUSE_TIME - (time.time() - LAST_LOSS))
                 if restante > 0:
-                    send(f"⏸️ Pausa de seguridad: {restante//60} minutos restantes.")
+                    send(f"⏸️ Pausa: {restante//60} min restantes.")
                     time.sleep(10)
                     continue
                 else:
                     LOSS_STREAK = 0
                     LAST_TRADE = None
-                    send("✅ Pausa finalizada. Buscando nuevas entradas...")
+                    send("✅ Pausa finalizada.")
 
             server_time = iq.get_server_timestamp()
             sec = server_time % 60
@@ -245,67 +245,63 @@ def main():
             mejor_opcion = None
             mayor_fuerza = 0
 
-            # Buscamos señales en una ventana de segundos más ajustada para Momentum
-            # para entrar en el mejor momento de la vela
-            if 40 <= sec <= 58: 
+            if 30 <= sec <= 58:
                 for pair in PAIRS:
                     df = get_df(iq, pair)
                     if df is None:
                         continue
 
-                    resultado = get_momentum_signal(df) # Usamos la nueva función
+                    resultado = get_reversal_signal(df, TOLERANCIA_NIVEL)
                     if resultado is not None:
-                        signal, fuerza, direccion = resultado
+                        signal, fuerza, tipo_nivel = resultado
                         if fuerza >= FUERZA_MINIMA and fuerza > mayor_fuerza:
                             mayor_fuerza = fuerza
-                            mejor_opcion = (pair, signal, fuerza, direccion)
-                            # Rompemos si encontramos una buena señal para ejecutarla rápido
-                            break 
+                            mejor_opcion = (pair, signal, fuerza, tipo_nivel)
 
             if 57 <= sec <= 59.9 and mejor_opcion is not None:
-                pair, signal, fuerza, direccion = mejor_opcion
+                pair, signal, fuerza, tipo_nivel = mejor_opcion
 
                 if (pair, signal) == LAST_TRADE:
                     continue
                 LAST_TRADE = (pair, signal)
 
-                send(f"""🎯 <b>SEÑAL DE MOMENTUM</b>
+                send(f"""🎯 <b>SEÑAL DE REVERSIÓN</b>
 💹 Activo: {pair}
-📈 Dirección: {direccion.upper()}
+📍 Nivel: {tipo_nivel.upper()}
 💪 Fuerza: {fuerza}/100
-📊 Operación: {'🟢 COMPRA' if signal == 'call' else '🔴 VENTA'}
-⏱️ Vencimiento: 1 minuto""")
+📊 Operación: {'🟢 COMPRA (Reversión Alcista)' if signal == 'call' else '🔴 VENTA (Reversión Bajista)'}
+⏱️ Vencimiento: 1 min""")
 
                 status, trade_id = iq.buy(BASE_AMOUNT, pair, signal, EXPIRATION)
 
                 if status:
                     DAILY_TRADES += 1
-                    send(f"🚀 <b>OPERACIÓN EJECUTADA</b>\nMonto: ${BASE_AMOUNT:.2f} | Total hoy: {DAILY_TRADES}/{MAX_DAILY_TRADES}")
+                    send(f"🚀 <b>EJECUTADA</b> | Monto: ${BASE_AMOUNT:.2f} | Total: {DAILY_TRADES}/{MAX_DAILY_TRADES}")
 
                     time.sleep(65)
                     try:
                         res = iq.check_win_v4(trade_id)
                         if res is None:
-                            send("⚠️ No se pudo verificar el resultado.")
+                            send("⚠️ Resultado no verificado.")
                             continue
 
                         if res < 0:
                             LOSS_STREAK += 1
                             LAST_LOSS = time.time()
-                            send(f"❌ <b>OPERACIÓN PERDIDA</b> | -${abs(res):.2f}\nRacha: {LOSS_STREAK}/{MAX_LOSS_STREAK}")
+                            send(f"❌ <b>PERDIDA</b> | -${abs(res):.2f}\nRacha: {LOSS_STREAK}/{MAX_LOSS_STREAK}")
                         else:
                             LOSS_STREAK = 0
-                            send(f"✅ <b>OPERACIÓN GANADA</b> | +${res:.2f}\n_________________________")
+                            send(f"✅ <b>GANADA</b> | +${res:.2f}\n_________________________")
 
                     except Exception as e:
                         send(f"⚠️ Error al verificar: {str(e)}")
                 else:
-                    send(f"❌ No se pudo ejecutar la operación en {pair}")
+                    send(f"❌ No se pudo ejecutar en {pair}")
 
             time.sleep(0.01)
 
         except Exception as e:
-            send(f"💥 Error: {str(e)} | Reiniciando conexión...")
+            send(f"💥 Error: {str(e)} | Reiniciando...")
             logging.exception("Error en bucle principal")
             time.sleep(3)
             try:
@@ -317,6 +313,6 @@ if __name__ == "__main__":
     required = ["IQ_EMAIL", "IQ_PASSWORD", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"]
     missing = [v for v in required if not os.getenv(v)]
     if missing:
-        print(f"❌ Faltan variables de entorno: {', '.join(missing)}")
+        print(f"❌ Faltan variables: {', '.join(missing)}")
         sys.exit(1)
     main()
