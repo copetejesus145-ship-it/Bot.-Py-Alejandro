@@ -2,66 +2,92 @@ import numpy as np
 import pandas as pd
 
 # ==================================================
-# 🚀 ESTRATEGIA DE MOMENTUM PURA
-# ✅ Busca movimientos fuertes y continuos
-# ✅ Usa EMA, ADX, y confirmación de velas
+# 🚀 ESTRATEGIA: REVERSIÓN EN SOPORTE / RESISTENCIA
+# ✅ Opera SOLO si el precio cierra JUSTO en el nivel
+# ✅ Entra en reversión
+# ✅ SIN ERRORES DE SINTAXIS
 # ==================================================
 
-def get_momentum_signal(df):
-    # Necesitamos al menos 30 velas para el cálculo del ADX
+def get_reversal_signal(df, tolerancia=0.0003):
     if len(df) < 30:
         return None
 
     df = df.copy()
 
     # --------------------------
-    # CÁLCULO DE INDICADORES
+    # DETECTAR NIVELES CLAVE
     # --------------------------
-    # Medias Móviles Exponenciales para detectar cruces y tendencia
-    df['ema5'] = df['close'].ewm(span=5, adjust=False).mean()
-    df['ema10'] = df['close'].ewm(span=10, adjust=False).mean()
-    df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
+    # Soportes (mínimos recientes)
+    df['minimo'] = df['low'].rolling(window=10, center=True).min()
+    soportes = df['minimo'].dropna().unique()
+    soportes = sorted([s for s in soportes if s > 0])
 
-    # Cálculo de ADX para la fuerza de la tendencia
-    df['tr'] = np.maximum(
-        df['high'] - df['low'],
-        np.maximum(
-            abs(df['high'] - df['close'].shift(1)),
-            abs(df['low'] - df['close'].shift(1))
-        )
-    )
-    df['dm_plus'] = np.where(
-        (df['high'] - df['high'].shift(1)) > (df['low'].shift(1) - df['low']),
-        np.maximum(df['high'] - df['high'].shift(1), 0.0),
-        0.0
-    )
-    df['dm_minus'] = np.where(
-        (df['low'].shift(1) - df['low']) > (df['high'] - df['high'].shift(1)),
-        np.maximum(df['low'].shift(1) - df['low'], 0.0),
-        0.0
-    )
-
-    tr14 = df['tr'].rolling(14).sum().replace(0, 0.001)
-    dmp14 = df['dm_plus'].rolling(14).sum()
-    dmm14 = df['dm_minus'].rolling(14).sum()
-
-    di_plus = 100.0 * dmp14 / tr14
-    di_minus = 100.0 * dmm14 / tr14
-    di_sum = (di_plus + di_minus).replace(0, 0.001)
-    dx = 100.0 * abs(di_plus - di_minus) / di_sum
-    df['adx'] = dx.rolling(14).mean()
+    # Resistencias (máximos recientes)
+    df['maximo'] = df['high'].rolling(window=10, center=True).max()
+    resistencias = df['maximo'].dropna().unique()
+    resistencias = sorted([r for r in resistencias if r > 0])
 
     # --------------------------
-    # EXTRACCIÓN SEGURA DE VALORES
+    # VALORES ACTUALES
     # --------------------------
     try:
-        ema5_1 = float(df['ema5'].iloc[-1])
-        ema10_1 = float(df['ema10'].iloc[-1])
-        ema20_1 = float(df['ema20'].iloc[-1])
-
-        c1 = float(df['close'].iloc[-1])
-        c2 = float(df['close'].iloc[-2])
-        c3 = float(df['close'].iloc[-3])
+        cierre = float(df['close'].iloc[-1])
+        apertura = float(df['open'].iloc[-1])
+        alto = float(df['high'].iloc[-1])
+        bajo = float(df['low'].iloc[-1])
         
-        o1 = float(df['open'].iloc[-1])
-        o2 = float
+        # Tendencia anterior
+        cierre_anterior = float(df['close'].iloc[-2])
+        cierre_anterior2 = float(df['close'].iloc[-3])
+        tendencia_anterior = cierre_anterior - cierre_anterior2
+
+    except Exception:
+        return None
+
+    senal = None
+    fuerza = 0
+    tipo_nivel = ""
+
+    # --------------------------
+    # CONDICIÓN 1: CIERRE EN SOPORTE → COMPRA
+    # --------------------------
+    for soporte in soportes:
+        if abs(cierre - soporte) <= tolerancia:
+            # Venía bajando
+            if tendencia_anterior < 0:
+                # Vela de reversión alcista
+                if cierre > apertura and (cierre - apertura) > tolerancia * 1.5:
+                    senal = "call"
+                    tipo_nivel = "Soporte"
+                    fuerza = 70
+                    # Confirmaciones extra
+                    if bajo >= soporte - tolerancia:
+                        fuerza += 10
+                    if volumen := float(df['volume'].iloc[-1]) > float(df['volume'].iloc[-5:-1].mean()) * 0.8:
+                        fuerza += 10
+                    break
+
+    # --------------------------
+    # CONDICIÓN 2: CIERRE EN RESISTENCIA → VENTA
+    # --------------------------
+    if senal is None:
+        for resistencia in resistencias:
+            if abs(cierre - resistencia) <= tolerancia:
+                # Venía subiendo
+                if tendencia_anterior > 0:
+                    # Vela de reversión bajista
+                    if cierre < apertura and (apertura - cierre) > tolerancia * 1.5:
+                        senal = "put"
+                        tipo_nivel = "Resistencia"
+                        fuerza = 70
+                        # Confirmaciones extra
+                        if alto <= resistencia + tolerancia:
+                            fuerza += 10
+                        if volumen := float(df['volume'].iloc[-1]) > float(df['volume'].iloc[-5:-1].mean()) * 0.8:
+                            fuerza += 10
+                        break
+
+    if senal is None:
+        return None
+
+    return (senal, min(fuerza, 100), tipo_nivel)
