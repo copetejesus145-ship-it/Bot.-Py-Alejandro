@@ -47,7 +47,7 @@ PAUSE_TIME = 1200
 MAX_RECONNECT_ATTEMPTS = 8
 RECONNECT_DELAY = 7
 FUERZA_MINIMA = 60
-TOLERANCIA_NIVEL = 0.0003  # 3 pips de margen para considerar "justo en el nivel"
+TOLERANCIA_NIVEL = 0.0003  # 3 pips de margen
 
 # Variables globales
 DAILY_TRADES = 0
