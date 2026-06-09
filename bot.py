@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN COMPATIBLE Y OPTIMIZADA
+# ⚙️ CONFIGURACIÓN PARA MÁXIMA ACTIVIDAD
 # ==========================================
 EMAIL = os.getenv("IQ_EMAIL")
 PASSWORD = os.getenv("IQ_PASSWORD")
@@ -28,8 +28,11 @@ EXPIRATION = 1
 BASE_AMOUNT = 25
 TIMEFRAME_M1 = 60
 
-# Lista completa de pares para mayor cantidad de señales
+# ✅ LISTA MÁS GRANDE DE PARES (REAL + OTC)
 PAIRS = [
+    "EURUSD", "GBPUSD", "USDCHF", "USDJPY", "EURGBP", "EURJPY", "GBPJPY", "AUDUSD",
+    "USDCAD", "NZDUSD", "AUDJPY", "CADJPY", "GBPAUD", "EURAUD", "AUDCAD", "NZDJPY",
+    "GBPCAD", "EURCAD", "AUDNZD", "GBPNZD", "EURNZD", "NZDCAD",
     "EURUSD-OTC", "GBPUSD-OTC", "USDCHF-OTC", "USDJPY-OTC",
     "EURGBP-OTC", "EURJPY-OTC", "GBPJPY-OTC", "AUDUSD-OTC",
     "USDCAD-OTC", "NZDUSD-OTC", "AUDJPY-OTC", "CADJPY-OTC",
@@ -38,12 +41,13 @@ PAIRS = [
     "EURNZD-OTC", "NZDCAD-OTC"
 ]
 
-MAX_DAILY_TRADES = 80
-MAX_LOSS_STREAK = 4
-PAUSE_TIME = 1200
-MAX_RECONNECT_ATTEMPTS = 8
-RECONNECT_DELAY = 7
-FUERZA_MINIMA = 50
+MAX_DAILY_TRADES = 100      # Límite muy alto para operar al máximo
+MAX_LOSS_STREAK = 5         # Más tolerancia
+PAUSE_TIME = 900            # Pausa muy corta: 15 minutos
+MAX_RECONNECT_ATTEMPTS = 10 # Más reintentos
+RECONNECT_DELAY = 5
+FUERZA_MINIMA = 40          # Umbral MUY BAJO para aceptar casi cualquier señal
+                            # (Asegura operación, pero puede reducir efectividad)
 
 # Variables globales
 DAILY_TRADES = 0
@@ -94,7 +98,7 @@ def listen_commands():
                 if text == "/start":
                     if not BOT_RUNNING:
                         BOT_RUNNING = True
-                        send("✅ <b>BOT INICIADO</b>\nAnalizando 22 activos, buscando señales frecuentes...")
+                        send("✅ <b>BOT INICIADO</b>\nAnalizando TODOS los activos, buscando MUCHAS señales!")
                     else:
                         send("ℹ️ El bot ya está activo.")
                 elif text == "/stop":
@@ -123,7 +127,7 @@ def reset_day():
             send("🔄 <b>NUEVO DÍA</b> | Contadores reiniciados.")
 
 # ====================================================
-# 🔌 CONEXIÓN IQ OPTION (SIN ERRORES DE ATRIBUTOS)
+# 🔌 CONEXIÓN IQ OPTION
 # ====================================================
 def connect():
     attempts = 0
@@ -136,17 +140,16 @@ def connect():
                 continue
 
             iq = IQ_Option(EMAIL, PASSWORD)
-            # Eliminado el método set_debug que no existe en versiones actuales
             ok, reason = iq.connect()
             
             if ok:
                 try:
                     iq.change_balance("PRACTICE")
                     balance = iq.get_balance()
-                    send(f"✅ <b>CONECTADO EXITOSAMENTE</b>\nSaldo: ${balance:.2f}\nAnalizando 22 activos.")
+                    send(f"✅ <b>CONECTADO EXITOSAMENTE</b>\nSaldo: ${balance:.2f}\nAnalizando {len(PAIRS)} activos.")
                     return iq
                 except Exception as e:
-                    send(f"⚠️ Cargando datos... Reintentando...")
+                    send(f"⚠️ Error al cargar saldo. Reintentando...")
                     iq = None
             else:
                 send(f"❌ Conexión fallida: {reason}")
@@ -162,9 +165,9 @@ def connect():
     return connect()
 
 # ====================================================
-# 📥 OBTENER DATOS CON REINTENTOS
+# 📥 OBTENER DATOS CON MÁS REINTENTOS Y VALIDACIONES
 # ====================================================
-def get_df(iq, pair, retries=2):
+def get_df(iq, pair, retries=3): # Más reintentos
     for _ in range(retries):
         try:
             if not iq or not iq.check_connect():
@@ -173,9 +176,10 @@ def get_df(iq, pair, retries=2):
                     time.sleep(1)
                     continue
 
-            data = iq.get_candles(pair, TIMEFRAME_M1, 30, time.time())
-            if not data or len(data) < 15:
-                time.sleep(0.5)
+            # Menos velas para acelerar y simplificar
+            data = iq.get_candles(pair, TIMEFRAME_M1, 20, time.time())
+            if not data or len(data) < 10: # Menos velas requeridas
+                time.sleep(0.3)
                 continue
 
             df = pd.DataFrame(data)
@@ -185,12 +189,12 @@ def get_df(iq, pair, retries=2):
 
         except Exception as e:
             logging.error(f"Datos {pair}: {str(e)}")
-            time.sleep(0.8)
+            time.sleep(0.5)
     
     return None
 
 # ====================================================
-# 🧠 BUCLE PRINCIPAL
+# 🧠 BUCLE PRINCIPAL (AJUSTADO PARA MÁS SEÑALES)
 # ====================================================
 def main():
     global BOT_RUNNING, LOSS_STREAK, LAST_LOSS, DAILY_TRADES, LAST_TRADE
@@ -198,7 +202,7 @@ def main():
 
     iq = connect()
     last_candle = None
-    send("ℹ️ <b>SISTEMA LISTO</b>\nEnvía /start para iniciar búsqueda de señales.")
+    send("ℹ️ <b>SISTEMA LISTO</b>\nEnvía /start para iniciar la búsqueda intensiva de señales.")
 
     while True:
         try:
@@ -234,15 +238,15 @@ def main():
             sec = server_time % 60
             current_candle = int(server_time // 60)
 
-            if current_candle == last_candle:
-                time.sleep(0.02)
-                continue
-            last_candle = current_candle
+            # Mayor rango para buscar señales
+            if 10 <= sec <= 59:
+                # Si estamos cerca de cerrar vela, buscar señal para la próxima
+                if sec >= 55:
+                    send("🔍 Buscando señal para la siguiente vela...")
+                
+                mejor_opcion = None
+                mayor_fuerza = 0
 
-            mejor_opcion = None
-            mayor_fuerza = 0
-
-            if 15 <= sec <= 59:
                 for pair in PAIRS:
                     df = get_df(iq, pair)
                     if df is None:
@@ -251,14 +255,17 @@ def main():
                     resultado = get_trend_signal(df)
                     if resultado is not None:
                         signal, fuerza, direccion = resultado
-                        if fuerza >= FUERZA_MINIMA and fuerza > mayor_fuerza:
-                            mayor_fuerza = fuerza
+                        # Aceptar la primera señal fuerte si es > FUERZA_MINIMA, no buscar la "mayor"
+                        # Esto asegura que opera si encuentra algo válido
+                        if fuerza >= FUERZA_MINIMA:
                             mejor_opcion = (pair, signal, fuerza, direccion)
+                            break # Romper y operar la primera señal válida
 
+            # Ejecutar SIEMPRE la primera señal encontrada dentro de la ventana de segundos
             if 57 <= sec <= 59.9 and mejor_opcion is not None:
                 pair, signal, fuerza, direccion = mejor_opcion
 
-                if (pair, signal) == LAST_TRADE:
+                if (pair, signal) == LAST_TRADE: # Evitar operar el mismo par/dirección repetidamente
                     continue
                 LAST_TRADE = (pair, signal)
 
@@ -295,10 +302,10 @@ def main():
                 else:
                     send(f"❌ No se pudo ejecutar la operación en {pair}")
 
-            time.sleep(0.01)
+            time.sleep(0.01) # Reducir sleep para mayor frecuencia
 
         except Exception as e:
-            send(f"💥 Error: {str(e)} | Reiniciando conexión...")
+            send(f"💥 Error: {str(e)} | Reiniciando...")
             logging.exception("Error en bucle principal")
             time.sleep(3)
             try:
