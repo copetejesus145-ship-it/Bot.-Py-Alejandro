@@ -28,7 +28,7 @@ EXPIRATION = 1
 BASE_AMOUNT = 25
 TIMEFRAME_M1 = 60
 
-# Lista de pares
+# Lista completa de pares
 PAIRS = [
     "EURUSD", "GBPUSD", "USDCHF", "USDJPY", "EURGBP", "EURJPY", "GBPJPY", "AUDUSD",
     "USDCAD", "NZDUSD", "AUDJPY", "CADJPY", "GBPAUD", "EURAUD", "AUDCAD", "NZDJPY",
@@ -47,7 +47,7 @@ PAUSE_TIME = 1200
 MAX_RECONNECT_ATTEMPTS = 8
 RECONNECT_DELAY = 7
 FUERZA_MINIMA = 60
-TOLERANCIA_NIVEL = 0.0003  # Margen pequeño: 3 pips para considerar "justo en el nivel"
+TOLERANCIA_NIVEL = 0.0003  # 3 pips de margen para considerar "justo en el nivel"
 
 # Variables globales
 DAILY_TRADES = 0
@@ -146,7 +146,7 @@ def connect():
                 try:
                     iq.change_balance("PRACTICE")
                     balance = iq.get_balance()
-                    send(f"✅ <b>CONECTADO</b>\nSaldo: ${balance:.2f}")
+                    send(f"✅ <b>CONECTADO</b>\nSaldo: ${balance:.2f}\nAnalizando {len(PAIRS)} activos.")
                     return iq
                 except Exception as e:
                     send(f"⚠️ Cargando datos... Reintentando...")
