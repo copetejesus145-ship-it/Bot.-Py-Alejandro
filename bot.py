@@ -8,7 +8,7 @@ import threading
 import logging
 from datetime import datetime, timezone
 
-from strategy import get_trend_signal
+from strategy import get_momentum_signal # Importamos la nueva función
 from iqoptionapi.stable_api import IQ_Option
 
 logging.basicConfig(
@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN PARA MÁXIMA ACTIVIDAD
+# ⚙️ CONFIGURACIÓN PARA ESTRATEGIA DE MOMENTUM
 # ==========================================
 EMAIL = os.getenv("IQ_EMAIL")
 PASSWORD = os.getenv("IQ_PASSWORD")
@@ -28,7 +28,7 @@ EXPIRATION = 1
 BASE_AMOUNT = 25
 TIMEFRAME_M1 = 60
 
-# ✅ LISTA MÁS GRANDE DE PARES (REAL + OTC)
+# ✅ LISTA COMPLETA DE PARES (REAL + OTC)
 PAIRS = [
     "EURUSD", "GBPUSD", "USDCHF", "USDJPY", "EURGBP", "EURJPY", "GBPJPY", "AUDUSD",
     "USDCAD", "NZDUSD", "AUDJPY", "CADJPY", "GBPAUD", "EURAUD", "AUDCAD", "NZDJPY",
@@ -41,13 +41,12 @@ PAIRS = [
     "EURNZD-OTC", "NZDCAD-OTC"
 ]
 
-MAX_DAILY_TRADES = 100      # Límite muy alto para operar al máximo
-MAX_LOSS_STREAK = 5         # Más tolerancia
-PAUSE_TIME = 900            # Pausa muy corta: 15 minutos
-MAX_RECONNECT_ATTEMPTS = 10 # Más reintentos
-RECONNECT_DELAY = 5
-FUERZA_MINIMA = 40          # Umbral MUY BAJO para aceptar casi cualquier señal
-                            # (Asegura operación, pero puede reducir efectividad)
+MAX_DAILY_TRADES = 70       # Ajustado para momentum (puede ser menor pero más preciso)
+MAX_LOSS_STREAK = 4
+PAUSE_TIME = 1200           # Pausa de 20 minutos
+MAX_RECONNECT_ATTEMPTS = 8
+RECONNECT_DELAY = 7
+FUERZA_MINIMA = 65          # Umbral de fuerza MÁS ALTO para señales de momentum
 
 # Variables globales
 DAILY_TRADES = 0
@@ -98,7 +97,7 @@ def listen_commands():
                 if text == "/start":
                     if not BOT_RUNNING:
                         BOT_RUNNING = True
-                        send("✅ <b>BOT INICIADO</b>\nAnalizando TODOS los activos, buscando MUCHAS señales!")
+                        send("✅ <b>BOT INICIADO</b>\nAnalizando todos los activos con estrategia de MOMENTUM...")
                     else:
                         send("ℹ️ El bot ya está activo.")
                 elif text == "/stop":
@@ -165,9 +164,9 @@ def connect():
     return connect()
 
 # ====================================================
-# 📥 OBTENER DATOS CON MÁS REINTENTOS Y VALIDACIONES
+# 📥 OBTENER DATOS CON REINTENTOS
 # ====================================================
-def get_df(iq, pair, retries=3): # Más reintentos
+def get_df(iq, pair, retries=3):
     for _ in range(retries):
         try:
             if not iq or not iq.check_connect():
@@ -176,9 +175,9 @@ def get_df(iq, pair, retries=3): # Más reintentos
                     time.sleep(1)
                     continue
 
-            # Menos velas para acelerar y simplificar
-            data = iq.get_candles(pair, TIMEFRAME_M1, 20, time.time())
-            if not data or len(data) < 10: # Menos velas requeridas
+            # Necesitamos más velas para el ADX y análisis de momentum
+            data = iq.get_candles(pair, TIMEFRAME_M1, 35, time.time()) 
+            if not data or len(data) < 30: # Requerimos más datos históricos
                 time.sleep(0.3)
                 continue
 
@@ -194,7 +193,7 @@ def get_df(iq, pair, retries=3): # Más reintentos
     return None
 
 # ====================================================
-# 🧠 BUCLE PRINCIPAL (AJUSTADO PARA MÁS SEÑALES)
+# 🧠 BUCLE PRINCIPAL
 # ====================================================
 def main():
     global BOT_RUNNING, LOSS_STREAK, LAST_LOSS, DAILY_TRADES, LAST_TRADE
@@ -202,7 +201,7 @@ def main():
 
     iq = connect()
     last_candle = None
-    send("ℹ️ <b>SISTEMA LISTO</b>\nEnvía /start para iniciar la búsqueda intensiva de señales.")
+    send("ℹ️ <b>SISTEMA LISTO</b>\nEnvía /start para iniciar la búsqueda de señales de momentum.")
 
     while True:
         try:
@@ -238,40 +237,41 @@ def main():
             sec = server_time % 60
             current_candle = int(server_time // 60)
 
-            # Mayor rango para buscar señales
-            if 10 <= sec <= 59:
-                # Si estamos cerca de cerrar vela, buscar señal para la próxima
-                if sec >= 55:
-                    send("🔍 Buscando señal para la siguiente vela...")
-                
-                mejor_opcion = None
-                mayor_fuerza = 0
+            if current_candle == last_candle:
+                time.sleep(0.02)
+                continue
+            last_candle = current_candle
 
+            mejor_opcion = None
+            mayor_fuerza = 0
+
+            # Buscamos señales en una ventana de segundos más ajustada para Momentum
+            # para entrar en el mejor momento de la vela
+            if 40 <= sec <= 58: 
                 for pair in PAIRS:
                     df = get_df(iq, pair)
                     if df is None:
                         continue
 
-                    resultado = get_trend_signal(df)
+                    resultado = get_momentum_signal(df) # Usamos la nueva función
                     if resultado is not None:
                         signal, fuerza, direccion = resultado
-                        # Aceptar la primera señal fuerte si es > FUERZA_MINIMA, no buscar la "mayor"
-                        # Esto asegura que opera si encuentra algo válido
-                        if fuerza >= FUERZA_MINIMA:
+                        if fuerza >= FUERZA_MINIMA and fuerza > mayor_fuerza:
+                            mayor_fuerza = fuerza
                             mejor_opcion = (pair, signal, fuerza, direccion)
-                            break # Romper y operar la primera señal válida
+                            # Rompemos si encontramos una buena señal para ejecutarla rápido
+                            break 
 
-            # Ejecutar SIEMPRE la primera señal encontrada dentro de la ventana de segundos
             if 57 <= sec <= 59.9 and mejor_opcion is not None:
                 pair, signal, fuerza, direccion = mejor_opcion
 
-                if (pair, signal) == LAST_TRADE: # Evitar operar el mismo par/dirección repetidamente
+                if (pair, signal) == LAST_TRADE:
                     continue
                 LAST_TRADE = (pair, signal)
 
-                send(f"""🎯 <b>SEÑAL DETECTADA</b>
+                send(f"""🎯 <b>SEÑAL DE MOMENTUM</b>
 💹 Activo: {pair}
-📈 Tendencia: {direccion.upper()}
+📈 Dirección: {direccion.upper()}
 💪 Fuerza: {fuerza}/100
 📊 Operación: {'🟢 COMPRA' if signal == 'call' else '🔴 VENTA'}
 ⏱️ Vencimiento: 1 minuto""")
@@ -302,10 +302,10 @@ def main():
                 else:
                     send(f"❌ No se pudo ejecutar la operación en {pair}")
 
-            time.sleep(0.01) # Reducir sleep para mayor frecuencia
+            time.sleep(0.01)
 
         except Exception as e:
-            send(f"💥 Error: {str(e)} | Reiniciando...")
+            send(f"💥 Error: {str(e)} | Reiniciando conexión...")
             logging.exception("Error en bucle principal")
             time.sleep(3)
             try:
