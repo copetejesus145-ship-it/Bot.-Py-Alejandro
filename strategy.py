@@ -1,82 +1,62 @@
 import pandas as pd
 import numpy as np
 
-def get_signal(df):
+def get_reversal_signal(df, tolerancia=0.0018, ventana=5):
     """
-    ESTRATEGIA: Entrada solo por cierre en soporte o resistencia
-    ✅ Solo si cierra en nivel clave
-    ✅ Detecta rechazo y reversión
-    ✅ Alta probabilidad de cambio en vela siguiente
-    ✅ Sin errores de comparación
+    ESTRATEGIA OPTIMIZADA: Detecta reversiones en soporte y resistencia
+    ✅ Analiza cierres en niveles clave
+    ✅ Detecta rechazo y mechas
+    ✅ Devuelve señal, fuerza y tipo de nivel
     """
-    if df is None or len(df) < 30:
-        return None, 0
+    if df is None or len(df) < ventana + 1:
+        return None
 
     data = df.copy()
-
-    # ======================================
-    # INDICADORES
-    # ======================================
     data['rango'] = data['high'] - data['low']
-    rango_prom = data['rango'].rolling(window=20).mean().iloc[-1]  # Solo valor final
-    data['cuerpo'] = abs(data['close'] - data['open'])
+    rango_promedio = data['rango'].rolling(window=ventana).mean().iloc[-1]
 
-    # Últimas 10 velas para detectar niveles
-    ultimas = data.tail(10).copy()
-    if len(ultimas) < 10:
-        return None, 0
+    if pd.isna(rango_promedio) or rango_promedio <= 0:
+        return None
 
-    # ======================================
-    # DETECTAR SOPORTE Y RESISTENCIA
-    # ======================================
-    # Resistencia: máximo de las 9 velas anteriores
+    ultimas = data.tail(ventana + 1).copy()
+    if len(ultimas) < ventana + 1:
+        return None
+
+    # Cálculo de niveles clave
     resistencia = round(ultimas['high'].iloc[:-1].max(), 5)
-    # Soporte: mínimo de las 9 velas anteriores
     soporte = round(ultimas['low'].iloc[:-1].min(), 5)
 
-    # Valores de la vela actual
     vela_actual = ultimas.iloc[-1]
     cierre = round(vela_actual['close'], 5)
     apertura = vela_actual['open']
     maximo = vela_actual['high']
     minimo = vela_actual['low']
-    cuerpo = vela_actual['cuerpo']
-    rango_actual = vela_actual['rango']
-
-    # Tolerancia para considerar que cierra en el nivel (8% del rango promedio)
-    tolerancia = round(rango_prom * 0.08, 5)
-
-    confianza = 0
+    cuerpo = abs(cierre - apertura)
 
     # ======================================
-    # CONDICIÓN 1: Cierre en SOPORTE → COMPRA
+    # SEÑAL DE COMPRA: Cierre en soporte + rechazo
     # ======================================
     if abs(cierre - soporte) <= tolerancia:
-        # Medimos rechazo fuerte
-        mecha_inferior = apertura - minimo if cierre > apertura else cierre - minimo
-        if (
-            mecha_inferior > rango_prom * 0.4  # Rechazo claro
-            and cuerpo < rango_prom * 0.7      # No sigue cayendo con fuerza
-            and cierre > apertura              # Cierre con presión compradora
-        ):
-            confianza = 75
-            return "call", confianza
+        mecha_inferior = (apertura - minimo) if cierre > apertura else (cierre - minimo)
+        
+        if (mecha_inferior > rango_promedio * 0.25 and 
+            cuerpo < rango_promedio * 0.8 and 
+            cierre > apertura):
+            
+            fuerza = int(min(95, 40 + (mecha_inferior / rango_promedio) * 60))
+            return "call", fuerza, "soporte"
 
     # ======================================
-    # CONDICIÓN 2: Cierre en RESISTENCIA → VENTA
+    # SEÑAL DE VENTA: Cierre en resistencia + rechazo
     # ======================================
     if abs(cierre - resistencia) <= tolerancia:
-        # Medimos rechazo fuerte
-        mecha_superior = maximo - cierre if cierre < apertura else maximo - apertura
-        if (
-            mecha_superior > rango_prom * 0.4  # Rechazo claro
-            and cuerpo < rango_prom * 0.7      # No sigue subiendo con fuerza
-            and cierre < apertura              # Cierre con presión vendedora
-        ):
-            confianza = 75
-            return "put", confianza
+        mecha_superior = (maximo - cierre) if cierre < apertura else (maximo - apertura)
+        
+        if (mecha_superior > rango_promedio * 0.25 and 
+            cuerpo < rango_promedio * 0.8 and 
+            cierre < apertura):
+            
+            fuerza = int(min(95, 40 + (mecha_superior / rango_promedio) * 60))
+            return "put", fuerza, "resistencia"
 
-    # ======================================
-    # Sin señal válida
-    # ======================================
-    return None, 0
+    return None
