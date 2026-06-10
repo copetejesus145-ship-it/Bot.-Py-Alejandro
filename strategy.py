@@ -3,10 +3,11 @@ import numpy as np
 
 def get_signal(df):
     """
-    ESTRATEGIA EXACTA: Entrada solo por cierre en soporte o resistencia
+    ESTRATEGIA: Entrada solo por cierre en soporte o resistencia
     ✅ Solo si cierra en nivel clave
-    ✅ Detecta rechazo/reversión
+    ✅ Detecta rechazo y reversión
     ✅ Alta probabilidad de cambio en vela siguiente
+    ✅ Sin errores de comparación
     """
     if df is None or len(df) < 30:
         return None, 0
@@ -17,9 +18,8 @@ def get_signal(df):
     # INDICADORES
     # ======================================
     data['rango'] = data['high'] - data['low']
-    rango_prom = data['rango'].rolling(window=20).mean()
+    rango_prom = data['rango'].rolling(window=20).mean().iloc[-1]  # Solo valor final
     data['cuerpo'] = abs(data['close'] - data['open'])
-    data['direccion'] = np.where(data['close'] > data['open'], 1, -1)
 
     # Últimas 10 velas para detectar niveles
     ultimas = data.tail(10).copy()
@@ -27,48 +27,56 @@ def get_signal(df):
         return None, 0
 
     # ======================================
-    # DETECTAR SOPORTE Y RESISTENCIA CLAVE
+    # DETECTAR SOPORTE Y RESISTENCIA
     # ======================================
-    # Resistencia: máximos de las últimas 8 velas
+    # Resistencia: máximo de las 9 velas anteriores
     resistencia = round(ultimas['high'].iloc[:-1].max(), 5)
-    # Soporte: mínimos de las últimas 8 velas
+    # Soporte: mínimo de las 9 velas anteriores
     soporte = round(ultimas['low'].iloc[:-1].min(), 5)
 
+    # Valores de la vela actual
     vela_actual = ultimas.iloc[-1]
     cierre = round(vela_actual['close'], 5)
-    tolerancia = rango_prom * 0.08  # Margen pequeño para considerar "cierre en nivel"
+    apertura = vela_actual['open']
+    maximo = vela_actual['high']
+    minimo = vela_actual['low']
+    cuerpo = vela_actual['cuerpo']
+    rango_actual = vela_actual['rango']
+
+    # Tolerancia para considerar que cierra en el nivel (8% del rango promedio)
+    tolerancia = round(rango_prom * 0.08, 5)
 
     confianza = 0
 
     # ======================================
-    # CONDICIÓN 1: CERRO EN SOPORTE → REVERSIÓN AL ALZA
+    # CONDICIÓN 1: Cierre en SOPORTE → COMPRA
     # ======================================
     if abs(cierre - soporte) <= tolerancia:
-        # Rechazo claro: mecha larga inferior + cuerpo pequeño/cierre recuperando
-        mecha_inferior = vela_actual['open'] - vela_actual['low'] if vela_actual['close'] > vela_actual['open'] else vela_actual['close'] - vela_actual['low']
+        # Medimos rechazo fuerte
+        mecha_inferior = apertura - minimo if cierre > apertura else cierre - minimo
         if (
-            mecha_inferior > rango_prom * 0.4  # Rechazo fuerte
-            and vela_actual['cuerpo'] < rango_prom * 0.6  # No sigue cayendo
-            and vela_actual['close'] > vela_actual['open']  # Cierre con compra
+            mecha_inferior > rango_prom * 0.4  # Rechazo claro
+            and cuerpo < rango_prom * 0.7      # No sigue cayendo con fuerza
+            and cierre > apertura              # Cierre con presión compradora
         ):
-            confianza = 85
+            confianza = 75
             return "call", confianza
 
     # ======================================
-    # CONDICIÓN 2: CERRO EN RESISTENCIA → REVERSIÓN A LA BAJA
+    # CONDICIÓN 2: Cierre en RESISTENCIA → VENTA
     # ======================================
     if abs(cierre - resistencia) <= tolerancia:
-        # Rechazo claro: mecha larga superior + cuerpo pequeño/cierre retrocediendo
-        mecha_superior = vela_actual['high'] - vela_actual['close'] if vela_actual['close'] < vela_actual['open'] else vela_actual['high'] - vela_actual['open']
+        # Medimos rechazo fuerte
+        mecha_superior = maximo - cierre if cierre < apertura else maximo - apertura
         if (
-            mecha_superior > rango_prom * 0.4  # Rechazo fuerte
-            and vela_actual['cuerpo'] < rango_prom * 0.6  # No sigue subiendo
-            and vela_actual['close'] < vela_actual['open']  # Cierre con venta
+            mecha_superior > rango_prom * 0.4  # Rechazo claro
+            and cuerpo < rango_prom * 0.7      # No sigue subiendo con fuerza
+            and cierre < apertura              # Cierre con presión vendedora
         ):
-            confianza = 85
+            confianza = 75
             return "put", confianza
 
     # ======================================
-    # SIN CONDICIÓN VÁLIDA
+    # Sin señal válida
     # ======================================
     return None, 0
