@@ -28,9 +28,9 @@ EXPIRATION = 1
 BASE_AMOUNT = 25
 TIMEFRAME_M1 = 60
 
-# Lista de pares principales
+# ✅ CAMBIO: Usamos pares OTC que están disponibles 24/7 y no cierran
 PAIRS = [
-    "EURUSD", "GBPUSD", "EURGBP", "EURJPY", "GBPJPY"
+    "EURUSD-OTC", "GBPUSD-OTC", "EURGBP-OTC", "EURJPY-OTC", "GBPJPY-OTC"
 ]
 
 MAX_DAILY_TRADES = 100
@@ -42,10 +42,10 @@ FUERZA_MINIMA = 40
 TOLERANCIA_NIVEL = 0.0012
 VENTANA_NIVELES = 6
 
-# ⏱️ TIEMPOS CORREGIDOS para ejecutar correctamente
-TIEMPO_ESPERA_EJECUCION = 0.3  # Espera 0.3s antes de enviar
-REINTENTOS_EJECUCION = 2       # Reintenta 2 veces si falla
-TIEMPO_MINIMO_VALIDO = 58      # ✅ NUEVO: Mínimo 58 segundos restantes para operar
+# ⏱️ TIEMPOS CORREGIDOS al máximo para IQ Option
+TIEMPO_ESPERA_EJECUCION = 0.1
+REINTENTOS_EJECUCION = 3
+TIEMPO_MINIMO_VALIDO = 59  # ✅ Ahora pide 59 segundos completos (lo que requiere IQ)
 
 # Variables globales
 DAILY_TRADES = 0
@@ -97,7 +97,7 @@ def listen_commands():
                 if text == "/start":
                     if not BOT_RUNNING:
                         BOT_RUNNING = True
-                        send("✅ <b>BOT INICIADO</b>\nEstrategia: Reversión\nEntrada: Siguiente vela\nEjecución corregida")
+                        send("✅ <b>BOT INICIADO</b>\nEstrategia: Reversión\nEntrada: Siguiente vela\nTiempos ajustados")
                     else:
                         send("ℹ️ El bot ya está activo.")
                 elif text == "/stop":
@@ -193,43 +193,37 @@ def get_df(iq, pair, retries=2):
     return None
 
 # ====================================================
-# 🚀 FUNCIÓN DE EJECUCIÓN SEGURA CON VERIFICACIÓN DE TIEMPO
+# 🚀 FUNCIÓN DE EJECUCIÓN SEGURA
 # ====================================================
 def ejecutar_operacion(iq, monto, par, direccion, vencimiento):
-    """Ejecuta con reintentos y espera para evitar errores + verifica tiempo válido"""
+    """Ejecuta solo si queda tiempo suficiente y el mercado está abierto"""
     for intento in range(REINTENTOS_EJECUCION + 1):
         try:
             if not iq.check_connect():
                 iq = connect()
-                time.sleep(0.5)
+                time.sleep(0.2)
             
-            # ✅ VERIFICACIÓN CRUCIAL: Comprobar que haya tiempo suficiente
+            # ✅ VERIFICACIÓN ESTRICTA DE TIEMPO
             tiempo_servidor = iq.get_server_timestamp()
             segundos_restantes = 60 - (tiempo_servidor % 60)
             
             if segundos_restantes < TIEMPO_MINIMO_VALIDO:
-                logging.warning(f"Tiempo insuficiente ({segundos_restantes}s < {TIEMPO_MINIMO_VALIDO}s)")
+                logging.warning(f"Tiempo insuficiente: {segundos_restantes}s")
                 return False, None
             
-            # Espera un momento antes de enviar
             time.sleep(TIEMPO_ESPERA_EJECUCION)
-            
             status, trade_id = iq.buy(monto, par, direccion, vencimiento)
             
             if status and trade_id > 0:
                 return True, trade_id
-            else:
-                if intento < REINTENTOS_EJECUCION:
-                    time.sleep(0.5)
-                    continue
-                else:
-                    return False, None
+            
+            if intento < REINTENTOS_EJECUCION:
+                time.sleep(0.2)
+
         except Exception as e:
             if intento < REINTENTOS_EJECUCION:
-                time.sleep(0.5)
-                continue
-            else:
-                return False, None
+                time.sleep(0.2)
+    
     return False, None
 
 # ====================================================
@@ -278,7 +272,7 @@ def main():
             current_candle = int(server_time // 60)
 
             # ==========================================
-            # EJECUTAR SEÑAL PENDIENTE
+            # EJECUTAR SEÑAL PENDIENTE AL INICIO DE VELA
             # ==========================================
             if current_candle != last_candle:
                 last_candle = current_candle
@@ -298,7 +292,6 @@ def main():
 📊 Tipo: {'🟢 COMPRA' if signal == 'call' else '🔴 VENTA'}
 ⏱️ Vencimiento: 1 min""")
 
-                    # Usamos la función segura
                     status, trade_id = ejecutar_operacion(iq, BASE_AMOUNT, pair, signal, EXPIRATION)
 
                     if status:
@@ -323,7 +316,7 @@ def main():
                         except Exception as e:
                             send(f"⚠️ Error al verificar: {str(e)}")
                     else:
-                        send(f"❌ No se pudo ejecutar en {pair} (tiempo insuficiente o mercado cerrado)")
+                        send(f"❌ No se pudo ejecutar en {pair}")
 
             # ==========================================
             # BUSCAR SEÑALES
@@ -344,7 +337,6 @@ def main():
                             mayor_fuerza = fuerza
                             mejor_opcion = (pair, signal, fuerza, tipo_nivel)
 
-                # Guardar señal al final de la vela
                 if 55 <= sec <= 57 and mejor_opcion is not None:
                     SEÑAL_PENDIENTE = mejor_opcion
                     pair, signal, fuerza, tipo_nivel = mejor_opcion
@@ -372,3 +364,4 @@ if __name__ == "__main__":
         print(f"❌ Faltan variables: {', '.join(missing)}")
         sys.exit(1)
     main()
+
