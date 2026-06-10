@@ -35,7 +35,7 @@ PAIRS = [
 MAX_DAILY_TRADES = 15
 MAX_LOSS_STREAK = 2
 PAUSE_TIME = 300
-MIN_CONFIANZA = 75  # Solo alta probabilidad
+MIN_CONFIANZA = 70
 MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_DELAY = 5
 
@@ -134,7 +134,6 @@ def main():
             sec = server_time % 60
             current_candle = int(server_time // 60)
 
-            # ANÁLISIS: segundos 25 a 57
             if 25 <= sec <= 57 and current_candle != LAST_PROCESSED_CANDLE:
                 LAST_PROCESSED_CANDLE = current_candle
                 best_pair = None
@@ -154,13 +153,12 @@ def main():
                 if best_pair:
                     PENDING_SIGNAL = (best_pair, best_signal)
                     if (best_pair, best_signal) != LAST_NOTIFIED:
-                        send(f"🔍 CIERRE EN NIVEL CLAVE: {best_pair} | {best_signal.upper()} | Prob: {best_conf}%\n⏳ Ejecución en vela siguiente")
+                        send(f"🔍 SEÑAL DETECTADA\n📊 Activo: {best_pair}\n📍 Nivel: {'RESISTENCIA' if best_signal == 'put' else 'SOPORTE'}\n💪 Fuerza: {best_conf}/100\n⏳ Ejecución: siguiente vela")
                         LAST_NOTIFIED = (best_pair, best_signal)
                 else:
                     PENDING_SIGNAL = None
                     LAST_NOTIFIED = None
 
-            # EJECUCIÓN EXACTA: 59.7 a 00.3
             if 59.7 <= sec <= 59.99 or 0 <= sec <= 0.3:
                 if not PENDING_SIGNAL:
                     continue
@@ -171,39 +169,43 @@ def main():
                 status, trade_id = iq.buy(BASE_AMOUNT, pair, direction, EXPIRATION)
                 if status:
                     DAILY_TRADES += 1
-                    tipo = "🟢 COMPRA (CALL)" if direction == "call" else "🔴 VENTA (PUT)"
-                    send(f"""🚀 OPERACIÓN EJECUTADA
+                    tipo = "🟢 COMPRA" if direction == "call" else "🔴 VENTA"
+                    send(f"""🚀 EJECUTANDO OPERACIÓN
 📊 Activo: {pair}
-📍 Entrada: Reversión en soporte/resistencia
-⏱️ Expiración: 1 minuto
+📍 Nivel: {'SOPORTE' if direction == 'call' else 'RESISTENCIA'}
+💪 Fuerza: {best_conf}/100
 📌 Tipo: {tipo}
-💲 Monto: ${BASE_AMOUNT}
-🔄 #Op: {DAILY_TRADES}/{MAX_DAILY_TRADES}""")
+⏱️ Vencimiento: 1 minuto
+💲 Monto: ${BASE_AMOUNT:.2f}""")
 
                     time.sleep(65)
                     res = iq.check_win_v4(trade_id)
                     if res is None:
-                        send("⚠️ Sin resultado")
+                        send("⚠️ Sin resultado de la operación")
                         continue
                     if res < 0:
                         LOSS_STREAK += 1
                         LAST_LOSS = time.time()
-                        send(f"❌ LOSS | -${abs(res):.2f} | Rachas: {LOSS_STREAK}/{MAX_LOSS_STREAK}")
+                        send(f"❌ <b>LOSS</b> | Pérdida: -${abs(res):.2f}\n⚠️ Rachas: {LOSS_STREAK}/{MAX_LOSS_STREAK}")
                     else:
                         LOSS_STREAK = 0
-                        send(f"✅ WIN | +${res:.2f}\n_________________________")
+                        send(f"✅ <b>WIN</b> | Ganancia: +${res:.2f}\n_________________________")
 
             time.sleep(0.03)
 
         except Exception as e:
-            send(f"💥 ERROR: {str(e)}")
+            send(f"💥 ERROR: {str(e)} | Reiniciando análisis...")
             time.sleep(5)
-            iq = connect()
+            try:
+                iq = connect()
+            except:
+                pass
 
 if __name__ == "__main__":
     required = ["IQ_EMAIL", "IQ_PASSWORD", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"]
     missing = [v for v in required if not os.getenv(v)]
     if missing:
-        print(f"Faltan variables: {missing}")
+        print(f"❌ Faltan variables: {', '.join(missing)}")
+        send(f"❌ Faltan configuraciones: {', '.join(missing)}")
         sys.exit(1)
     main()
