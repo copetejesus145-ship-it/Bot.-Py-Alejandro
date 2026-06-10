@@ -28,7 +28,7 @@ EXPIRATION = 1
 BASE_AMOUNT = 25
 TIMEFRAME_M1 = 60
 
-# ✅ CAMBIO: Usamos pares OTC que están disponibles 24/7 y no cierran
+# ✅ Pares OTC disponibles 24/7
 PAIRS = [
     "EURUSD-OTC", "GBPUSD-OTC", "EURGBP-OTC", "EURJPY-OTC", "GBPJPY-OTC"
 ]
@@ -42,10 +42,10 @@ FUERZA_MINIMA = 40
 TOLERANCIA_NIVEL = 0.0012
 VENTANA_NIVELES = 6
 
-# ⏱️ TIEMPOS CORREGIDOS al máximo para IQ Option
+# ⏱️ Tiempos ajustados
 TIEMPO_ESPERA_EJECUCION = 0.1
 REINTENTOS_EJECUCION = 3
-TIEMPO_MINIMO_VALIDO = 59  # ✅ Ahora pide 59 segundos completos (lo que requiere IQ)
+TIEMPO_MINIMO_VALIDO = 59
 
 # Variables globales
 DAILY_TRADES = 0
@@ -150,7 +150,7 @@ def connect():
                     return iq
                 except Exception as e:
                     send(f"⚠️ Cargando datos...")
-                    iq = None
+                    return iq
             else:
                 send(f"❌ Conexión fallida: {reason}")
                 
@@ -319,9 +319,9 @@ def main():
                         send(f"❌ No se pudo ejecutar en {pair}")
 
             # ==========================================
-            # BUSCAR SEÑALES
+            # BUSCAR SEÑALES (CORREGIDO EL ERROR DEL 01)
             # ==========================================
-            if 10 <= sec <= 01:
+            if 10 <= sec <= 57:  # ✅ Rango válido sin ceros a la izquierda
                 mejor_opcion = None
                 mayor_fuerza = 0
 
@@ -337,6 +337,7 @@ def main():
                             mayor_fuerza = fuerza
                             mejor_opcion = (pair, signal, fuerza, tipo_nivel)
 
+                # Guardar señal para ejecutar en la siguiente vela
                 if 55 <= sec <= 57 and mejor_opcion is not None:
                     SEÑAL_PENDIENTE = mejor_opcion
                     pair, signal, fuerza, tipo_nivel = mejor_opcion
