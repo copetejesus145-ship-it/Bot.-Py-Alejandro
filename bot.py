@@ -8,7 +8,8 @@ import threading
 import logging
 from datetime import datetime, timezone
 
-from strategy import get_reversal_signal
+# ✅ CORREGIDO: Usamos la función correcta que existe en strategy.py
+from strategy import get_signal
 from iqoptionapi.stable_api import IQ_Option
 
 logging.basicConfig(
@@ -17,7 +18,7 @@ logging.basicConfig(
 )
 
 # ==========================================
-# ⚙️ CONFIGURACIÓN FINAL - EJECUCIÓN GARANTIZADA
+# ⚙️ CONFIGURACIÓN FINAL
 # ==========================================
 EMAIL = os.getenv("IQ_EMAIL")
 PASSWORD = os.getenv("IQ_PASSWORD")
@@ -28,7 +29,6 @@ EXPIRATION = 1
 BASE_AMOUNT = 25
 TIMEFRAME_M1 = 60
 
-# ✅ Pares OTC disponibles 24/7
 PAIRS = [
     "EURUSD-OTC", "GBPUSD-OTC", "EURGBP-OTC", "EURJPY-OTC", "GBPJPY-OTC"
 ]
@@ -42,12 +42,10 @@ FUERZA_MINIMA = 40
 TOLERANCIA_NIVEL = 0.0012
 VENTANA_NIVELES = 6
 
-# ⏱️ Tiempos ajustados
 TIEMPO_ESPERA_EJECUCION = 0.1
 REINTENTOS_EJECUCION = 3
 TIEMPO_MINIMO_VALIDO = 59
 
-# Variables globales
 DAILY_TRADES = 0
 CURRENT_DAY = datetime.now(timezone.utc).day
 LOSS_STREAK = 0
@@ -97,7 +95,7 @@ def listen_commands():
                 if text == "/start":
                     if not BOT_RUNNING:
                         BOT_RUNNING = True
-                        send("✅ <b>BOT INICIADO</b>\nEstrategia: Reversión\nEntrada: Siguiente vela\nTiempos ajustados")
+                        send("✅ <b>BOT INICIADO</b>\nEstrategia: Reversión\nEntrada: Siguiente vela")
                     else:
                         send("ℹ️ El bot ya está activo.")
                 elif text == "/stop":
@@ -144,7 +142,7 @@ def connect():
             
             if ok:
                 try:
-                    iq.change_balance("PRACTICE")  # Cambia a "REAL" cuando quieras
+                    iq.change_balance("PRACTICE")
                     balance = iq.get_balance()
                     send(f"✅ <b>CONECTADO</b>\nSaldo: ${balance:.2f}")
                     return iq
@@ -193,17 +191,15 @@ def get_df(iq, pair, retries=2):
     return None
 
 # ====================================================
-# 🚀 FUNCIÓN DE EJECUCIÓN SEGURA
+# 🚀 EJECUCIÓN SEGURA
 # ====================================================
 def ejecutar_operacion(iq, monto, par, direccion, vencimiento):
-    """Ejecuta solo si queda tiempo suficiente y el mercado está abierto"""
     for intento in range(REINTENTOS_EJECUCION + 1):
         try:
             if not iq.check_connect():
                 iq = connect()
                 time.sleep(0.2)
             
-            # ✅ VERIFICACIÓN ESTRICTA DE TIEMPO
             tiempo_servidor = iq.get_server_timestamp()
             segundos_restantes = 60 - (tiempo_servidor % 60)
             
@@ -271,9 +267,7 @@ def main():
             sec = server_time % 60
             current_candle = int(server_time // 60)
 
-            # ==========================================
-            # EJECUTAR SEÑAL PENDIENTE AL INICIO DE VELA
-            # ==========================================
+            # Ejecutar señal pendiente
             if current_candle != last_candle:
                 last_candle = current_candle
                 
@@ -318,10 +312,8 @@ def main():
                     else:
                         send(f"❌ No se pudo ejecutar en {pair}")
 
-            # ==========================================
-            # BUSCAR SEÑALES (CORREGIDO EL ERROR DEL 01)
-            # ==========================================
-            if 10 <= sec <= 57:  # ✅ Rango válido sin ceros a la izquierda
+            # Buscar señales
+            if 10 <= sec <= 57:
                 mejor_opcion = None
                 mayor_fuerza = 0
 
@@ -330,14 +322,14 @@ def main():
                     if df is None:
                         continue
 
-                    resultado = get_reversal_signal(df, TOLERANCIA_NIVEL, VENTANA_NIVELES)
-                    if resultado is not None:
-                        signal, fuerza, tipo_nivel = resultado
-                        if fuerza >= FUERZA_MINIMA and fuerza > mayor_fuerza:
-                            mayor_fuerza = fuerza
-                            mejor_opcion = (pair, signal, fuerza, tipo_nivel)
+                    # ✅ CORREGIDO: Usamos la función correcta get_signal
+                    signal, fuerza = get_signal(df)
+                    if signal is not None and fuerza >= FUERZA_MINIMA and fuerza > mayor_fuerza:
+                        mayor_fuerza = fuerza
+                        # Detectamos el tipo de nivel
+                        tipo_nivel = "soporte" if signal == "call" else "resistencia"
+                        mejor_opcion = (pair, signal, fuerza, tipo_nivel)
 
-                # Guardar señal para ejecutar en la siguiente vela
                 if 55 <= sec <= 57 and mejor_opcion is not None:
                     SEÑAL_PENDIENTE = mejor_opcion
                     pair, signal, fuerza, tipo_nivel = mejor_opcion
