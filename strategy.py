@@ -3,13 +3,13 @@ import pandas as pd
 
 # ==================================================
 # 🚀 ESTRATEGIA: REVERSIÓN EN SOPORTE / RESISTENCIA
-# ✅ Opera SOLO si el precio cierra JUSTO en el nivel
-# ✅ Entra en reversión
-# ✅ SIN ERRORES DE SINTAXIS
+# ✅ Optimizada para encontrar más señales
+# ✅ Reglas claras pero flexibles
+# ✅ Sin errores
 # ==================================================
 
-def get_reversal_signal(df, tolerancia=0.0003):
-    if len(df) < 30:
+def get_reversal_signal(df, tolerancia=0.0012, ventana=6):
+    if len(df) < ventana + 2:
         return None
 
     df = df.copy()
@@ -18,12 +18,12 @@ def get_reversal_signal(df, tolerancia=0.0003):
     # DETECTAR NIVELES CLAVE
     # --------------------------
     # Soportes (mínimos recientes)
-    df['minimo'] = df['low'].rolling(window=10, center=True).min()
+    df['minimo'] = df['low'].rolling(window=ventana, center=False).min()
     soportes = df['minimo'].dropna().unique()
     soportes = sorted([s for s in soportes if s > 0])
 
     # Resistencias (máximos recientes)
-    df['maximo'] = df['high'].rolling(window=10, center=True).max()
+    df['maximo'] = df['high'].rolling(window=ventana, center=False).max()
     resistencias = df['maximo'].dropna().unique()
     resistencias = sorted([r for r in resistencias if r > 0])
 
@@ -36,10 +36,9 @@ def get_reversal_signal(df, tolerancia=0.0003):
         alto = float(df['high'].iloc[-1])
         bajo = float(df['low'].iloc[-1])
         
-        # Tendencia anterior
+        # Tendencia de las últimas 2 velas
         cierre_anterior = float(df['close'].iloc[-2])
-        cierre_anterior2 = float(df['close'].iloc[-3])
-        tendencia_anterior = cierre_anterior - cierre_anterior2
+        tendencia_anterior = cierre_anterior - float(df['close'].iloc[-3]) if len(df)>=3 else 0
 
     except Exception:
         return None
@@ -49,42 +48,40 @@ def get_reversal_signal(df, tolerancia=0.0003):
     tipo_nivel = ""
 
     # --------------------------
-    # CONDICIÓN 1: CIERRE EN SOPORTE → COMPRA
+    # COMPRA EN SOPORTE
     # --------------------------
     for soporte in soportes:
         if abs(cierre - soporte) <= tolerancia:
-            # Venía bajando
-            if tendencia_anterior < 0:
-                # Vela de reversión alcista
-                if cierre > apertura and (cierre - apertura) > tolerancia * 1.5:
+            # Veníamos bajando o lateral
+            if tendencia_anterior <= 0:
+                # Vela muestra cambio
+                if cierre > apertura:
                     senal = "call"
                     tipo_nivel = "Soporte"
-                    fuerza = 70
-                    # Confirmaciones extra
+                    fuerza = 40
                     if bajo >= soporte - tolerancia:
-                        fuerza += 10
-                    if volumen := float(df['volume'].iloc[-1]) > float(df['volume'].iloc[-5:-1].mean()) * 0.8:
-                        fuerza += 10
+                        fuerza += 15
+                    if (cierre - apertura) > tolerancia * 0.3:
+                        fuerza += 15
                     break
 
     # --------------------------
-    # CONDICIÓN 2: CIERRE EN RESISTENCIA → VENTA
+    # VENTA EN RESISTENCIA
     # --------------------------
     if senal is None:
         for resistencia in resistencias:
             if abs(cierre - resistencia) <= tolerancia:
-                # Venía subiendo
-                if tendencia_anterior > 0:
-                    # Vela de reversión bajista
-                    if cierre < apertura and (apertura - cierre) > tolerancia * 1.5:
+                # Veníamos subiendo o lateral
+                if tendencia_anterior >= 0:
+                    # Vela muestra cambio
+                    if cierre < apertura:
                         senal = "put"
                         tipo_nivel = "Resistencia"
-                        fuerza = 70
-                        # Confirmaciones extra
+                        fuerza = 40
                         if alto <= resistencia + tolerancia:
-                            fuerza += 10
-                        if volumen := float(df['volume'].iloc[-1]) > float(df['volume'].iloc[-5:-1].mean()) * 0.8:
-                            fuerza += 10
+                            fuerza += 15
+                        if (apertura - cierre) > tolerancia * 0.3:
+                            fuerza += 15
                         break
 
     if senal is None:
