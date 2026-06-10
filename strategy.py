@@ -1,90 +1,74 @@
-import numpy as np
 import pandas as pd
+import numpy as np
 
-# ==================================================
-# 🚀 ESTRATEGIA: REVERSIÓN EN SOPORTE / RESISTENCIA
-# ✅ Optimizada para encontrar más señales
-# ✅ Reglas claras pero flexibles
-# ✅ Sin errores
-# ==================================================
+def get_signal(df):
+    """
+    ESTRATEGIA EXACTA: Entrada solo por cierre en soporte o resistencia
+    ✅ Solo si cierra en nivel clave
+    ✅ Detecta rechazo/reversión
+    ✅ Alta probabilidad de cambio en vela siguiente
+    """
+    if df is None or len(df) < 30:
+        return None, 0
 
-def get_reversal_signal(df, tolerancia=0.0012, ventana=6):
-    if len(df) < ventana + 2:
-        return None
+    data = df.copy()
 
-    df = df.copy()
+    # ======================================
+    # INDICADORES
+    # ======================================
+    data['rango'] = data['high'] - data['low']
+    rango_prom = data['rango'].rolling(window=20).mean()
+    data['cuerpo'] = abs(data['close'] - data['open'])
+    data['direccion'] = np.where(data['close'] > data['open'], 1, -1)
 
-    # --------------------------
-    # DETECTAR NIVELES CLAVE
-    # --------------------------
-    # Soportes (mínimos recientes)
-    df['minimo'] = df['low'].rolling(window=ventana, center=False).min()
-    soportes = df['minimo'].dropna().unique()
-    soportes = sorted([s for s in soportes if s > 0])
+    # Últimas 10 velas para detectar niveles
+    ultimas = data.tail(10).copy()
+    if len(ultimas) < 10:
+        return None, 0
 
-    # Resistencias (máximos recientes)
-    df['maximo'] = df['high'].rolling(window=ventana, center=False).max()
-    resistencias = df['maximo'].dropna().unique()
-    resistencias = sorted([r for r in resistencias if r > 0])
+    # ======================================
+    # DETECTAR SOPORTE Y RESISTENCIA CLAVE
+    # ======================================
+    # Resistencia: máximos de las últimas 8 velas
+    resistencia = round(ultimas['high'].iloc[:-1].max(), 5)
+    # Soporte: mínimos de las últimas 8 velas
+    soporte = round(ultimas['low'].iloc[:-1].min(), 5)
 
-    # --------------------------
-    # VALORES ACTUALES
-    # --------------------------
-    try:
-        cierre = float(df['close'].iloc[-1])
-        apertura = float(df['open'].iloc[-1])
-        alto = float(df['high'].iloc[-1])
-        bajo = float(df['low'].iloc[-1])
-        
-        # Tendencia de las últimas 2 velas
-        cierre_anterior = float(df['close'].iloc[-2])
-        tendencia_anterior = cierre_anterior - float(df['close'].iloc[-3]) if len(df)>=3 else 0
+    vela_actual = ultimas.iloc[-1]
+    cierre = round(vela_actual['close'], 5)
+    tolerancia = rango_prom * 0.08  # Margen pequeño para considerar "cierre en nivel"
 
-    except Exception:
-        return None
+    confianza = 0
 
-    senal = None
-    fuerza = 0
-    tipo_nivel = ""
+    # ======================================
+    # CONDICIÓN 1: CERRO EN SOPORTE → REVERSIÓN AL ALZA
+    # ======================================
+    if abs(cierre - soporte) <= tolerancia:
+        # Rechazo claro: mecha larga inferior + cuerpo pequeño/cierre recuperando
+        mecha_inferior = vela_actual['open'] - vela_actual['low'] if vela_actual['close'] > vela_actual['open'] else vela_actual['close'] - vela_actual['low']
+        if (
+            mecha_inferior > rango_prom * 0.4  # Rechazo fuerte
+            and vela_actual['cuerpo'] < rango_prom * 0.6  # No sigue cayendo
+            and vela_actual['close'] > vela_actual['open']  # Cierre con compra
+        ):
+            confianza = 85
+            return "call", confianza
 
-    # --------------------------
-    # COMPRA EN SOPORTE
-    # --------------------------
-    for soporte in soportes:
-        if abs(cierre - soporte) <= tolerancia:
-            # Veníamos bajando o lateral
-            if tendencia_anterior <= 0:
-                # Vela muestra cambio
-                if cierre > apertura:
-                    senal = "call"
-                    tipo_nivel = "Soporte"
-                    fuerza = 40
-                    if bajo >= soporte - tolerancia:
-                        fuerza += 15
-                    if (cierre - apertura) > tolerancia * 0.3:
-                        fuerza += 15
-                    break
+    # ======================================
+    # CONDICIÓN 2: CERRO EN RESISTENCIA → REVERSIÓN A LA BAJA
+    # ======================================
+    if abs(cierre - resistencia) <= tolerancia:
+        # Rechazo claro: mecha larga superior + cuerpo pequeño/cierre retrocediendo
+        mecha_superior = vela_actual['high'] - vela_actual['close'] if vela_actual['close'] < vela_actual['open'] else vela_actual['high'] - vela_actual['open']
+        if (
+            mecha_superior > rango_prom * 0.4  # Rechazo fuerte
+            and vela_actual['cuerpo'] < rango_prom * 0.6  # No sigue subiendo
+            and vela_actual['close'] < vela_actual['open']  # Cierre con venta
+        ):
+            confianza = 85
+            return "put", confianza
 
-    # --------------------------
-    # VENTA EN RESISTENCIA
-    # --------------------------
-    if senal is None:
-        for resistencia in resistencias:
-            if abs(cierre - resistencia) <= tolerancia:
-                # Veníamos subiendo o lateral
-                if tendencia_anterior >= 0:
-                    # Vela muestra cambio
-                    if cierre < apertura:
-                        senal = "put"
-                        tipo_nivel = "Resistencia"
-                        fuerza = 40
-                        if alto <= resistencia + tolerancia:
-                            fuerza += 15
-                        if (apertura - cierre) > tolerancia * 0.3:
-                            fuerza += 15
-                        break
-
-    if senal is None:
-        return None
-
-    return (senal, min(fuerza, 100), tipo_nivel)
+    # ======================================
+    # SIN CONDICIÓN VÁLIDA
+    # ======================================
+    return None, 0
