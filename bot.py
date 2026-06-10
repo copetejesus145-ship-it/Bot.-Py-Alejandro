@@ -30,7 +30,7 @@ TIMEFRAME_M1 = 60
 
 # Lista de pares principales
 PAIRS = [
-    "EURUSD", "GBPUSD", "USDCHF", "USDJPY", "EURGBP", "EURJPY", "GBPJPY"
+    "EURUSD", "GBPUSD", "EURGBP", "EURJPY", "GBPJPY"
 ]
 
 MAX_DAILY_TRADES = 100
